@@ -27,6 +27,30 @@ Krypton, EntityCulling и ModernFix одним нажатием.
 уравнения, где элементы интерфейса задают более плотную среду, — и живой фон на кнопках:
 луг в режиме Vanilla, небула в режиме vulkan.
 
+## Установка
+
+В релизе две сборки — выбери по разрядности своей Windows:
+
+| Файл | Для чего |
+|---|---|
+| `vulkan-launcher-Setup-<версия>-x64.exe` | 64-битная Windows (обычный случай) |
+| `vulkan-launcher-Setup-<версия>-ia32.exe` | 32-битная Windows |
+
+Права администратора не нужны. Лаунчер ставится в `%LOCALAPPDATA%\Programs\vulkan launcher`
+и создаёт два ярлыка: обычный и `Vanilla`.
+
+### Требования
+
+**Java.** Лаунчер ищет её сам в Program Files или по `JAVA_HOME`. Нужна:
+
+- **Java 21 или новее** — для Minecraft 1.17 и выше. Её требует сама игра.
+- **Java 17** — для версий до 1.20.1 включительно. Лаунчер возьмёт её, если 21-й нет.
+
+**Про 32-битную Windows — важное ограничение.** На ней лаунчер запустится, но
+**Minecraft 1.21.x играть не получится**: игра требует Java 21, а 32-битной Java 21
+не существует ни у Adoptium, ни у Azul — там для 32-бит есть только Java 17.
+С 32-битной Java 17 работают версии игры **до 1.20.1 включительно**.
+
 ## Сборка
 
 Нужен JDK 17+ (проект собран на Temurin 17).
@@ -44,12 +68,14 @@ Krypton, EntityCulling и ModernFix одним нажатием.
 ```
 cd installer
 npm install
-npm run dist
+npm run dist:x64     # 64-битная Windows
+npm run dist:ia32    # 32-битная Windows
 ```
 
-Результат — `installer/dist/vulkan-launcher-Setup-<версия>.exe`. Перед сборкой в
-`installer/backend/` должны лежать `vulkan-launcher.jar` и папка `videos/` с фоновыми
-роликами: они не хранятся в репозитории, а входят в релиз отдельными файлами.
+Результат — `installer/dist/vulkan-launcher-Setup-<версия>-<арх>.exe`.
+Перед сборкой в `installer/backend/` должны лежать `vulkan-launcher.jar`,
+`pulsePLUS.jar` и папка `videos/` с фоновыми роликами: они не хранятся
+в репозитории, а входят в релиз отдельными файлами.
 
 Установщик кладёт приложение в `%LOCALAPPDATA%\Programs\vulkan launcher` (права
 администратора не нужны) и создаёт два ярлыка: обычный и `Vanilla` с аргументом

@@ -30,7 +30,12 @@ app.commandLine.appendSwitch('disable-renderer-backgrounding');
 app.commandLine.appendSwitch('disable-backgrounding-occluded-windows');
 app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
 
-// Locate Java 21 on the host system.
+// Locate Java on the host system.
+//
+// Ищем Java 21+ — её требует Minecraft 1.17 и новее. Но если такой нет, берём
+// любую 17+: на 32-битной Windows 21-й версии не существует в принципе (ни у
+// Adoptium, ни у Azul), а 17-я есть, и с ней идут версии игры до 1.20.1.
+// Поэтому не «только 21», а «лучшая из найденных, но не ниже 17».
 function findJava() {
   const cfg = readConfig();
   if (cfg && cfg.javaPath) {
@@ -57,19 +62,37 @@ function findJava() {
     'Semeru',
     'Oracle'
   ];
+
+  // Разбираем версию из имени каталога: jdk-21.0.10 → 21, jdk1.8.0_402 → 8
+  const versionOf = (dirName) => {
+    const m = dirName.match(/(\d+)(?:\.(\d+))?/);
+    if (!m) return 0;
+    const major = Number(m[1]);
+    return major === 1 ? Number(m[2] || 0) : major;
+  };
+
+  const found = [];
   for (const b of bases) {
     if (!b || !fs.existsSync(b)) continue;
     for (const v of vendors) {
       const dir = path.join(b, v);
       if (!fs.existsSync(dir)) continue;
       for (const jdk of fs.readdirSync(dir)) {
-        if (!jdk.includes('21') && !jdk.includes('22') && !jdk.includes('23')) continue;
+        const version = versionOf(jdk);
+        if (version < 17) continue;
         for (const exe of ['javaw.exe', 'java.exe']) {
           const p = path.join(dir, jdk, 'bin', exe);
-          if (fs.existsSync(p)) return p;
+          if (fs.existsSync(p)) { found.push({ path: p, version }); break; }
         }
       }
     }
+  }
+
+  if (found.length) {
+    found.sort((a, b) => b.version - a.version);
+    const best = found.find((f) => f.version >= 21) || found[0];
+    console.log('[vulkan] java:', best.path, '(версия', best.version + ')');
+    return best.path;
   }
   return 'javaw';
 }

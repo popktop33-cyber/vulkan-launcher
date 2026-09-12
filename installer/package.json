@@ -7,8 +7,10 @@
   "private": true,
   "main": "main.js",
   "scripts": {
-    "dist": "electron-builder --win nsis",
-    "pack": "electron-builder --win --dir"
+    "dist": "electron-builder --win nsis --x64",
+    "dist:x64": "electron-builder --win nsis --x64",
+    "dist:ia32": "electron-builder --win nsis --ia32",
+    "pack": "electron-builder --win --dir --x64"
   },
   "build": {
     "appId": "com.vulkan.launcher",
@@ -28,14 +30,11 @@
     "win": {
       "target": [
         {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
+          "target": "nsis"
         }
       ],
       "icon": "icon.ico",
-      "artifactName": "vulkan-launcher-Setup-${version}.exe"
+      "artifactName": "vulkan-launcher-Setup-${version}-${arch}.exe"
     },
     "nsis": {
       "include": "installer.nsh",
