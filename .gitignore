@@ -1,0 +1,14 @@
+# Сборка бэкенда
+build/
+build.sh.log
+
+# Проект установщика
+node_modules/
+dist/
+installer/backend/
+
+# Артефакты разработки
+*.log
+*.bak
+*.rar
+*.zip

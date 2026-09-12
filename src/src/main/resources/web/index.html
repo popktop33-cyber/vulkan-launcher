@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>vulkan launcher</title>
+  <script>
+    // Уровень производительности определяем ДО первой отрисовки: от него зависит,
+    // включать ли дорогое стекло (backdrop-filter) и часть эффектов. Если сделать
+    // это позже, при старте успеет мелькнуть тяжёлый вариант.
+    (function () {
+      var cores = navigator.hardwareConcurrency || 4;
+      var mem = navigator.deviceMemory || 4;
+      var gpu = '';
+      try {
+        var gl = document.createElement('canvas').getContext('webgl');
+        var dbg = gl && gl.getExtension('WEBGL_debug_renderer_info');
+        if (dbg) gpu = String(gl.getParameter(dbg.UNMASKED_RENDERER_WEBGL) || '');
+      } catch (e) {}
+      // Встроенная графика и программный рендер — верный признак слабой машины
+      var weakGpu = /intel|hd graphics|gma|uhd graphics|mali|adreno|powervr|swiftshader|software|llvmpipe/i.test(gpu);
+      var tier = (cores <= 4 || mem <= 4 || weakGpu) ? 'low' : (cores <= 8 ? 'mid' : 'high');
+      document.documentElement.dataset.perf = tier;
+    })();
+  </script>
+  <link rel="stylesheet" href="css/style.css?v=20260706-0004">
+</head>
+<body>
+  <video class="bg" id="bgPlay" autoplay muted loop playsinline></video>
+  <video class="bg hidden" id="bgMods" autoplay muted loop playsinline></video>
+  <!-- Crossfade layer: the incoming background fades in over the current one -->
+  <video id="bgFade" autoplay muted loop playsinline></video>
+  <div class="scrim"></div>
+  <!-- Spring-follow blur circle that trails the cursor -->
+  <div id="cursorBlur"></div>
+
+  <!-- Волновое поле по клику. Не картинка с кружком, а симуляция волнового
+       уравнения: элементы интерфейса затираются в сетку препятствиями,
+       и волна от них отражается. -->
+  <canvas id="fxWave"></canvas>
+  <!-- Фон при наведении. Один общий холст, который переезжает под курсор:
+       трава в режиме Vanilla, небула в режиме чита. -->
+  <canvas id="fxHover"></canvas>
+
+  <header class="titlebar">
+    <span class="title"><b>vulkan</b> launcher</span>
+    <div class="title-actions">
+      <button class="title-btn folder" title="Open folder" onclick="openCurrentFolder()">DIR</button>
+      <button class="title-btn" title="Minimize" onclick="pulse.minimize()">-</button>
+      <button class="title-btn" title="Maximize" onclick="pulse.maximize()">[]</button>
+      <button class="title-btn close" title="Close" onclick="closeLauncher()">X</button>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <aside class="sidebar">
+      <div class="brand-block">
+        <div class="brand-logo" id="logoText">vulkan<span class="caret">_</span></div>
+        <div class="brand-version" id="brandVersion">1.21.4 - Fabric</div>
+      </div>
+
+      <div class="profile-card">
+        <div class="profile-name" id="profileName">Player</div>
+        <div class="profile-meta" id="profileMeta">локальный профиль</div>
+      </div>
+
+      <nav class="nav">
+        <button class="nav-btn active" onclick="switchTab('play', this)">Play</button>
+        <button class="nav-btn" onclick="switchTab('mods', this)">Mods</button>
+        <button class="nav-btn" onclick="switchTab('settings', this)">Settings</button>
+      </nav>
+
+      <section class="pulse-lock-card reveal" id="pulseLockCard">
+        <div class="section-label">Профиль</div>
+        <div class="pulse-lock-main">Fabric 1.21.4</div>
+        <div class="pulse-lock-sub">Фиксированная сборка</div>
+      </section>
+
+      <section class="versions-card vanilla-only" id="versionsCard">
+        <div class="section-label">Versions</div>
+        <div class="versions-list" id="versionList"></div>
+      </section>
+
+      <button class="account-bar" id="accountBar" onclick="openAccounts()" title="Управление аккаунтами">
+        <div class="avatar" id="avatar">P</div>
+        <div class="account-bar-text">
+          <div class="account-name" id="accountName">Player</div>
+          <div class="account-state" id="accountState">локальный профиль</div>
+        </div>
+        <span class="account-bar-chevron">›</span>
+      </button>
+    </aside>
+
+    <section class="content">
+      <div class="mode-switch">
+        <button class="mode-btn active" id="pulseModeBtn" onclick="setMode('pulse')">vulkan</button>
+        <button class="mode-btn" id="vanillaModeBtn" onclick="setMode('vanilla')">Vanilla</button>
+      </div>
+
+      <section class="page active" id="page-play">
+        <div class="hero-card reveal">
+          <div class="hero-badge" id="heroBadge">Ready to play</div>
+          <h1 id="heroTitle">Ready to play.</h1>
+          <p id="heroText">vulkan client locked to Fabric 1.21.4, with separate Vanilla routing and isolated clean profile.</p>
+
+          <div class="hero-actions">
+            <button class="launch-btn" id="launchBtn" onclick="launchGame()">
+              <span id="launchBtnLabel">LAUNCH</span>
+            </button>
+            <div class="launch-meta">
+              <b id="loaderLabel">Fabric</b>
+              <span id="loaderSubtext">loader build - 1.21.4</span>
+            </div>
+          </div>
+
+          <div class="loader-panel vanilla-only">
+            <button class="loader-toggle" id="loaderToggle" onclick="toggleLoaderDrawer()">Available loaders</button>
+            <div class="loader-drawer" id="loaderDrawer"></div>
+          </div>
+
+          <div class="version-summary vanilla-only">
+            <div class="summary-card">
+              <strong id="selectedVersionLabel">1.21.4</strong>
+              <span>selected version</span>
+            </div>
+            <div class="summary-card">
+              <strong id="selectedLoaderVersionLabel">Fabric 1.21.4</strong>
+              <span>selected loader build</span>
+            </div>
+            <div class="summary-card">
+              <strong id="selectedModeLabel">vulkan</strong>
+              <span>active profile</span>
+            </div>
+          </div>
+
+          <div class="progress-wrap">
+            <div class="progress-track"><i id="launchProgress"></i></div>
+            <div class="progress-text" id="launchStatus">Ready</div>
+          </div>
+
+          <button class="text-link" id="logToggle" onclick="toggleLog()">Show log</button>
+          <pre class="logbox" id="logbox"></pre>
+        </div>
+
+        <div class="music-card reveal">
+          <div class="music-top">
+            <div>
+              <div class="music-title">Background music</div>
+              <div class="music-sub" id="musicTrackTitle">Waiting for tracks...</div>
+            </div>
+            <div class="music-badges">
+              <button class="chip green" id="musicTabMP3" onclick="switchMusicTab('mp3')">MP3</button>
+              <button class="chip violet active" id="musicTabBytebeat" onclick="switchMusicTab('bytebeat')">BYTEBEAT</button>
+              <button class="chip info" id="musicTabPlaylist" onclick="switchMusicTab('playlist')">PLAYLIST</button>
+            </div>
+          </div>
+          <div class="music-controls">
+            <button class="mini-btn" id="musicPlayBtn" onclick="toggleMusicPlayback()">Pause</button>
+            <button class="mini-btn" onclick="nextTrack()">Next</button>
+            <label class="music-volume">
+              <span>Volume</span>
+              <input type="range" min="0" max="100" value="70" id="musicVolumeSlider" oninput="onMusicVolume(this.value)">
+              <b id="musicVolumeValue">70%</b>
+            </label>
+          </div>
+          <div class="music-status" id="musicStatus">Crossfade ready - music folder auto-created</div>
+
+          <!-- MP3 / Audio files tab -->
+          <div class="music-tab-panel" id="musicPanelMP3">
+            <div class="music-files-list" id="mp3FilesList"></div>
+            <button class="mini-btn" onclick="openMusicFolder()">Open music folder</button>
+          </div>
+
+          <!-- Bytebeat tab -->
+          <div class="music-tab-panel active" id="musicPanelBytebeat">
+            <!-- Now playing + transport. The track list was removed on purpose:
+                 switching tabs picks the bytebeat playlist, and the arrows skip
+                 through it like a player rather than offering a menu. -->
+            <div class="bytebeat-now">
+              <span class="bytebeat-now-icon" id="bytebeatNowIcon">♪</span>
+              <div class="bytebeat-now-text">
+                <div class="bytebeat-now-title" id="bytebeatNowTitle">Не выбран</div>
+                <div class="bytebeat-now-meta" id="bytebeatNowMeta">Bytebeat</div>
+              </div>
+            </div>
+
+            <div class="bytebeat-transport">
+              <button class="mini-btn round" id="bytebeatPrevBtn" title="Предыдущий" onclick="prevBytebeatTrack()">⏮</button>
+              <button class="mini-btn round primary" id="bytebeatPlayBtn" title="Играть" onclick="toggleBytebeatPlayback()">▶</button>
+              <button class="mini-btn round" id="bytebeatNextBtn" title="Следующий" onclick="nextBytebeatTrack()">⏭</button>
+            </div>
+
+            <!-- FFT Visualizer -->
+            <div class="bytebeat-visualizer">
+              <canvas id="bytebeatFFTCanvas" width="400" height="120"></canvas>
+            </div>
+
+            <!-- Settings button -->
+            <button class="mini-btn" onclick="openBytebeatSettings()" style="margin-top:12px;">⚙️ Bytebeat Settings</button>
+          </div>
+
+          <!-- Playlist tab -->
+          <div class="music-tab-panel" id="musicPanelPlaylist">
+            <div class="spotify-section">
+              <div class="spotify-row">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
+                <span class="spotify-label">Spotify</span>
+                <button class="mini-btn spotify-open-btn" onclick="openSpotifyModal()">Настроить</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Bytebeat Settings Modal -->
+      <div class="modal" id="bytebeatSettingsModal" style="display:none;">
+        <div class="modal-content" style="max-width:480px;">
+          <div class="modal-header">
+            <h3>Bytebeat Settings</h3>
+            <button class="close-btn" onclick="closeBytebeatSettings()">×</button>
+          </div>
+          <div class="modal-body">
+            <div class="setting-row">
+              <label>Mode</label>
+              <select id="bytebeatModeSelect" onchange="updateBytebeatMode()">
+                <option value="floatbeat" selected>Floatbeat</option>
+                <option value="bytebeat">Bytebeat (8-bit)</option>
+                <option value="signed">Signed Bytebeat</option>
+                <option value="funcbeat">Funcbeat</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label>Sample Rate (Hz)</label>
+              <select id="bytebeatSampleRateSelect" onchange="updateBytebeatSampleRate()">
+                <option value="8000">8000</option>
+                <option value="11025">11025</option>
+                <option value="22050">22050</option>
+                <option value="44100" selected>44100</option>
+                <option value="48000">48000</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label>FFT Size</label>
+              <select id="bytebeatFFTSizeSelect" onchange="updateBytebeatFFTSize()">
+                <option value="256">256</option>
+                <option value="512">512</option>
+                <option value="1024" selected>1024</option>
+                <option value="2048">2048</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <label>Visualizer Height (px)</label>
+              <input type="range" id="bytebeatVisualizerHeight" min="60" max="240" value="120" step="20" oninput="updateVisualizerHeight(this.value)">
+              <span id="visualizerHeightLabel">120px</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <section class="page" id="page-mods">
+        <div class="mods-head reveal">
+          <div>
+            <h2>Mod Browser</h2>
+            <p>Compatibility is tied to the selected Minecraft version and loader build.</p>
+          </div>
+          <a href="https://modrinth.com" target="_blank" rel="noreferrer">via modrinth.com -&gt;</a>
+        </div>
+
+        <div class="mods-toolbar reveal">
+          <input id="modsSearch" placeholder="Search mods in Modrinth catalog" oninput="debouncedBrowserSearch(this.value)">
+          <button class="ghost-btn" onclick="autoInstallRequiredMods()">Auto-install required mods</button>
+          <button class="ghost-btn" onclick="installPerformancePack()" title="Sodium, Lithium, FerriteCore и другие — кратный рост FPS">Ускорить игру</button>
+          <button class="ghost-btn vanilla-only" onclick="runAutoDisable()">Auto-disable incompatible</button>
+          <button class="ghost-btn vanilla-only" onclick="checkModUpdates()">Auto-update status</button>
+        </div>
+
+        <div class="mods-layout">
+          <div class="mods-column">
+            <div class="mods-section reveal">
+              <div class="mods-section-title">Catalog browser</div>
+              <div class="browser-results" id="browserModsList"></div>
+            </div>
+
+            <div class="mods-section reveal vanilla-only">
+              <div class="mods-section-title">Loader builds for selected version</div>
+              <div class="inline-loader-list" id="inlineLoaderList"></div>
+            </div>
+
+            <div class="mods-section reveal">
+              <div class="mods-section-title">Installed / disabled mods</div>
+              <div class="mods-list" id="modsList"></div>
+            </div>
+
+            <div class="mods-section reveal">
+              <div class="mods-section-title">Downloaded library</div>
+              <div class="downloaded-list" id="downloadedModsList"></div>
+            </div>
+          </div>
+
+          <aside class="mod-detail t-panel-slide" id="modDetail" data-open="false">
+            <div class="detail-icon" id="detailIcon">M</div>
+            <div class="t-stagger" id="detailStagger">
+              <h3 class="t-stagger-line t-stagger-line--1" id="detailName">Select a mod</h3>
+              <div class="detail-meta t-stagger-line t-stagger-line--2" id="detailMeta">Version compatibility and update status will appear here.</div>
+              <p class="detail-desc t-stagger-line t-stagger-line--3" id="detailDesc">Choose any mod from the list to inspect compatibility, state and local actions.</p>
+            </div>
+            <div class="detail-actions">
+              <button class="ghost-btn" id="toggleSelectedModBtn" onclick="toggleSelectedMod()">Toggle</button>
+              <button class="ghost-btn" onclick="restoreModsSnapshot()">Restore snapshot</button>
+            </div>
+            <div class="detail-flags" id="detailFlags"></div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="page" id="page-settings">
+        <div class="settings-grid">
+          <div class="settings-card reveal">
+            <h3>Launch</h3>
+            <label class="setting-row">
+              <span>RAM allocation</span>
+              <input type="range" id="ramSlider" min="512" max="16384" step="256" value="2048" oninput="updateRam(this.value)">
+            </label>
+            <div class="setting-note" id="ramValue">2 GB</div>
+            <label class="setting-row">
+              <span>Java path</span>
+              <input type="text" id="javaPath" class="text-input" placeholder="Auto-detect">
+            </label>
+          </div>
+
+          <div class="settings-card reveal vanilla-only">
+            <h3>Profiles</h3>
+            <label class="setting-row">
+              <span>Vanilla default version</span>
+              <select id="vanillaVersionSelect" class="select-input" onchange="syncVanillaVersion(this.value)"></select>
+            </label>
+            <div class="setting-note">Vanilla runs from %appdata%/pulsePLUS/vanilla.</div>
+          </div>
+
+          <div class="settings-card reveal vanilla-only">
+            <h3>Mods</h3>
+            <label class="toggle-row">
+              <span>Auto-update mods</span>
+              <input type="checkbox" id="autoUpdateMods" onchange="saveSettings()">
+            </label>
+            <label class="toggle-row">
+              <span>Auto-disable incompatible mods</span>
+              <input type="checkbox" id="autoDisableMods" onchange="saveSettings()">
+            </label>
+            <label class="toggle-row">
+              <span>Show downloaded mods library</span>
+              <input type="checkbox" id="useDownloadedModsLibrary" onchange="saveSettings()">
+            </label>
+          </div>
+
+          <div class="settings-card reveal">
+            <h3>Music</h3>
+            <label class="toggle-row">
+              <span>Enable background music</span>
+              <input type="checkbox" id="musicEnabled" onchange="saveSettings()">
+            </label>
+            <label class="setting-row">
+              <span>Music volume</span>
+              <input type="range" min="0" max="100" value="70" id="musicVolumeSettings" oninput="onMusicVolume(this.value)">
+            </label>
+            <div class="setting-note" id="musicFolderLabel">music folder: %appdata%/pulsePLUS/music</div>
+          </div>
+        </div>
+
+        <div class="settings-actions reveal">
+          <button class="launch-btn small" onclick="saveSettings(true)">Save settings</button>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <!-- Управление аккаунтами. Панель выезжает справа по паттерну panel reveal
+       из design/panel reveal.txt, а заголовок с подписью проявляются каскадом
+       по паттерну text reveal из design/text reveal.txt. -->
+  <div class="account-scrim" id="accountScrim" onclick="closeAccounts()"></div>
+  <aside class="account-panel t-panel-slide t-panel-slide--x" id="accountPanel" data-open="false">
+    <div class="account-panel-head">
+      <div class="t-stagger" id="accountStagger">
+        <h3 class="t-stagger-line t-stagger-line--1">Аккаунты</h3>
+        <p class="t-stagger-line t-stagger-line--2">Выбери, под кем играть</p>
+      </div>
+      <button class="account-close" onclick="closeAccounts()" title="Закрыть">✕</button>
+    </div>
+
+    <div class="account-list" id="accountList"></div>
+
+    <div class="account-block">
+      <div class="account-block-title">Новый офлайн-профиль</div>
+      <div class="account-add-row">
+        <input id="accountNameInput" class="text-input" maxlength="16" placeholder="Ник"
+               onkeydown="if(event.key==='Enter') addOfflineAccount()">
+        <button class="ghost-btn" onclick="addOfflineAccount()">Добавить</button>
+      </div>
+      <div class="account-hint">3–16 символов: латиница, цифры, подчёркивание</div>
+    </div>
+
+    <div class="account-block">
+      <div class="account-block-title">Вход Microsoft</div>
+      <div id="accountMsaBody"></div>
+    </div>
+  </aside>
+
+  <div class="toast-stack" id="toastStack"></div>
+
+  <!-- Goodbye overlay shown while the launcher closes -->
+  <div id="goodbyeOverlay">
+    <div class="goodbye-inner">
+      <div class="goodbye-title" id="goodbyeTitle">до встречи</div>
+      <div class="goodbye-sub">закрываем лаунчер…</div>
+    </div>
+  </div>
+
+  <!-- Spotify setup modal -->
+  <div class="sp-modal-backdrop" id="spotifyModal" onclick="onSpotifyModalBackdrop(event)">
+    <div class="sp-modal">
+      <div class="sp-modal-header">
+        <div class="sp-modal-icon">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="#1DB954">
+            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+          </svg>
+        </div>
+        <div class="sp-modal-titles">
+          <h2>Spotify Player</h2>
+          <p>Открой плейлист прямо из лаунчера</p>
+        </div>
+        <button class="sp-modal-close" onclick="closeSpotifyModal()">✕</button>
+      </div>
+
+      <div class="sp-modal-body">
+        <div class="sp-info-block">
+          <div class="sp-info-row">
+            <span class="sp-info-dot green"></span>
+            <span>Открывается в отдельном окне с полным плеером</span>
+          </div>
+          <div class="sp-info-row">
+            <span class="sp-info-dot green"></span>
+            <span>Сессия сохраняется — войди один раз</span>
+          </div>
+          <div class="sp-info-row">
+            <span class="sp-info-dot green"></span>
+            <span>Поддерживает плейлисты, альбомы и треки</span>
+          </div>
+        </div>
+
+        <label class="sp-input-label">Ссылка на Spotify</label>
+        <div class="sp-input-row">
+          <input
+            id="spotifyModalInput"
+            class="sp-input"
+            type="text"
+            placeholder="https://open.spotify.com/playlist/..."
+            onkeydown="if(event.key==='Enter') openSpotifyFromModal()"
+          >
+        </div>
+        <div class="sp-hint">Вставь ссылку на плейлист, альбом или трек Spotify</div>
+      </div>
+
+      <div class="sp-modal-footer">
+        <button class="sp-btn-cancel" onclick="closeSpotifyModal()">Отмена</button>
+        <button class="sp-btn-open" onclick="openSpotifyFromModal()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+          </svg>
+          Открыть Spotify
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js?v=20260706-0004"></script>
+  <script src="js/effects.js?v=20260706-0004"></script>
+</body>
+</html>

@@ -1,0 +1,1128 @@
+:root{
+  /* Шкала закруглений. Держим её короткой: разнобой в 3/4/8/10/11/13/14/22px
+     и читался как «где-то скруглено, где-то нет». */
+  --r-xs:6px;
+  --r-sm:9px;
+  --r-md:12px;
+  --r-lg:16px;
+  --r-xl:20px;
+  --r-pill:999px;
+  --mx:0;
+  --my:0;
+  --accent:#7d5cff;
+  --accent-soft:#ab98ff;
+  --green:#53d86f;
+  --green-soft:#9bf5ac;
+  --bg:#08090d;
+  --panel:rgba(13,14,22,.58);
+  --panel-strong:rgba(11,12,18,.74);
+  --card:rgba(20,22,32,.58);
+  --card-soft:rgba(255,255,255,.045);
+  --text:#f3f5ff;
+  --muted:#b6bad5;
+  --warn:#f5cc72;
+  --bad:#ff8895;
+  --border:rgba(130,111,255,.18);
+  --green-border:rgba(83,216,111,.24);
+  --shadow:0 20px 60px rgba(0,0,0,.28);
+  --radius:var(--r-lg);
+}
+
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif}
+body{position:relative}
+button,input,select{font:inherit}
+button{border:none;outline:none}
+input,select{outline:none}
+
+.bg{
+  position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;
+  opacity:.97;transition:opacity .28s ease,transform 4s ease;transform:scale(1.02);
+  filter:brightness(1.02) saturate(1.1) contrast(1.03)
+}
+.bg.hidden{opacity:0;pointer-events:none}
+.bg.is-missing{display:none}
+/* Crossfade layer: a second video that fades in OVER the current one, so one
+   background melts into the next with both visible mid-transition (no black dip). */
+#bgFade{
+  position:fixed;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;
+  opacity:0;pointer-events:none;transform:scale(1.02);
+  filter:brightness(1.02) saturate(1.1) contrast(1.03);
+  transition:opacity .28s ease
+}
+#bgFade.show{opacity:.97}
+.scrim{
+  position:fixed;inset:0;z-index:1;
+  background:
+    radial-gradient(circle at 12% 40%, rgba(8,9,13,.28), rgba(8,9,13,.07) 34%, rgba(8,9,13,.26) 68%, rgba(8,9,13,.38)),
+    linear-gradient(120deg, rgba(125,92,255,.06), transparent 36%),
+    linear-gradient(180deg, rgba(8,9,13,.04), rgba(8,9,13,.18));
+}
+
+.titlebar{
+  position:relative;z-index:6;height:34px;display:flex;align-items:center;padding:0 10px 0 16px;
+  -webkit-app-region:drag;user-select:none
+}
+.title{font-size:12px;font-weight:700;color:#cad0f1}
+.title b{color:#fff}
+.title-actions{margin-left:auto;display:flex;gap:2px;-webkit-app-region:no-drag}
+.title-btn{
+  width:38px;height:26px;border-radius:9px;background:transparent;color:#d9dcf3;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;transition:background .16s ease,color .16s ease;
+  font-size:11px;font-weight:800
+}
+.title-btn:hover{background:rgba(255,255,255,.10);color:#fff}
+.title-btn.folder{color:#ffcf52}
+.title-btn.close:hover{background:#de4d66}
+
+body.preview-minimized .app-shell{opacity:.18;transform:scale(.985)}
+body.preview-minimized .content,body.preview-minimized .sidebar{pointer-events:none}
+
+.app-shell{
+  position:relative;z-index:2;height:calc(100vh - 34px);padding:10px 12px 12px;display:grid;
+  grid-template-columns:218px 1fr;gap:0;transition:transform .22s ease
+}
+.sidebar{
+  background:linear-gradient(180deg, rgba(9,10,16,.56), rgba(11,12,18,.74));
+  border:1px solid var(--border);border-right:none;border-radius:20px 0 0 20px;
+  backdrop-filter:blur(10px);box-shadow:var(--shadow);padding:16px 14px 14px;
+  display:flex;flex-direction:column;min-height:0
+}
+.content{
+  position:relative;background:linear-gradient(180deg, rgba(8,9,13,.16), rgba(12,13,20,.24));
+  border:1px solid var(--border);border-radius:0 20px 20px 0;backdrop-filter:blur(5px);overflow:hidden;transition:transform .22s ease
+}
+
+.brand-block{padding-bottom:16px}
+.brand-logo{
+  font-size:23px;font-weight:800;line-height:1;background:linear-gradient(90deg,var(--accent),var(--accent-soft));
+  -webkit-background-clip:text;background-clip:text;color:transparent;letter-spacing:-.03em
+}
+.caret{color:var(--accent-soft);animation:blink 1s steps(1) infinite}
+.brand-version{margin-top:7px;font-size:11px;color:#d0d5ef}
+
+.profile-card{
+  padding:12px 0 16px;border-top:1px solid rgba(255,255,255,.02);border-bottom:1px solid rgba(130,111,255,.18);
+  margin-bottom:16px
+}
+.profile-name{font-size:13px;font-weight:700;color:#fff}
+.profile-meta{margin-top:4px;font-size:11px;color:var(--muted)}
+
+.nav{display:grid;gap:8px}
+.nav-btn{
+  position:relative;padding:12px 14px;border-radius:12px;background:transparent;color:#d6dcfa;
+  font-size:14px;font-weight:700;text-align:left;cursor:pointer;transition:.18s
+}
+.nav-btn:hover{background:rgba(255,255,255,.06);color:#fff}
+.nav-btn.active{
+  background:linear-gradient(90deg, rgba(125,92,255,.26), rgba(125,92,255,.10));
+  color:#fff;box-shadow:inset 0 0 0 1px rgba(125,92,255,.12)
+}
+.nav-btn.active::before{
+  content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:999px;background:var(--accent)
+}
+
+.versions-card{margin-top:16px;display:grid;gap:10px;flex:1;min-height:0}
+.pulse-lock-card{
+  margin-top:16px;padding:14px 14px 12px;border-radius:16px;border:1px solid rgba(125,92,255,.18);
+  background:rgba(255,255,255,.04);display:grid;gap:6px;animation:fadeSlide .45s ease both
+}
+.pulse-lock-main{font-size:18px;font-weight:900;color:#fff}
+.pulse-lock-sub{font-size:11px;color:#d1d8f4;line-height:1.45}
+.vanilla-only{display:none}
+body.vanilla-mode .vanilla-only{display:grid}
+body.vanilla-mode .versions-card.vanilla-only{display:grid}
+body.vanilla-mode .loader-panel.vanilla-only{display:block}
+body.vanilla-mode .version-summary.vanilla-only{display:grid}
+body.vanilla-mode .mods-section.vanilla-only{display:block}
+body.vanilla-mode .ghost-btn.vanilla-only{display:inline-flex}
+body.vanilla-mode #pulseLockCard{display:none}
+.section-label{font-size:11px;font-weight:800;letter-spacing:.12em;color:#c7b8ff;text-transform:uppercase}
+.versions-list{display:grid;gap:7px;overflow:auto;padding-right:3px}
+.versions-list::-webkit-scrollbar{width:6px}
+.versions-list::-webkit-scrollbar-thumb{background:rgba(125,92,255,.40);border-radius:999px}
+.version-item{
+  padding:10px 12px;border-radius:12px;border:1px solid transparent;background:rgba(255,255,255,.04);
+  display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:.16s;color:#f1f4ff
+}
+.version-item:hover{border-color:rgba(125,92,255,.24);transform:translateX(2px)}
+.version-item.active{background:rgba(125,92,255,.16);border-color:rgba(125,92,255,.30)}
+body.vanilla-mode .version-item.active{background:rgba(83,216,111,.14);border-color:rgba(83,216,111,.28)}
+.version-item .ver-main{font-size:13px;font-weight:700;color:#fff}
+.version-item .ver-loader{font-size:10px;color:#d2d8f5}
+.version-item .ver-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+
+.account-bar{
+  margin-top:14px;padding-top:14px;border-top:1px solid rgba(130,111,255,.18);display:flex;align-items:center;gap:10px
+}
+.avatar{
+  width:42px;height:42px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent-soft));
+  display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff
+}
+body.vanilla-mode .avatar{background:linear-gradient(135deg,#53d86f,#2fa84a)}
+.account-name{font-size:13px;font-weight:700;color:#fff}
+.account-state{font-size:10px;color:#d5dbfa}
+
+/* ── Управление аккаунтами ────────────────────────────────────────────────────
+   Панель выезжает справа. Тайминги, прозрачность и блюр берутся из паттерна
+   panel reveal (design/panel reveal.txt) — здесь только раскладка и цвет. */
+
+button.account-bar{
+  width:100%;background:transparent;border:0;cursor:pointer;text-align:left;
+  color:inherit;font:inherit;transition:background .18s
+}
+button.account-bar:hover{background:rgba(255,255,255,.05);border-radius:12px}
+.account-bar-text{flex:1;min-width:0}
+.account-bar-chevron{color:var(--muted);font-size:20px;line-height:1;transition:transform .18s,color .18s}
+button.account-bar:hover .account-bar-chevron{transform:translateX(2px);color:#fff}
+
+/* Тот же panel reveal, но по X: для боковой панели вертикальный ход читается
+   как «всплытие снизу» и путает. Все прочие свойства паттерна не тронуты. */
+.t-panel-slide.t-panel-slide--x{transform:translateX(var(--panel-translate-x,28px))}
+.t-panel-slide.t-panel-slide--x[data-open="true"]{transform:translateX(0)}
+
+/* Высота заголовка. Панель и затемнение начинаются НИЖЕ него, иначе перекрывают
+   область перетаскивания окна и кнопки свернуть/закрыть. */
+:root { --titlebar-h: 34px; }
+
+.account-scrim{
+  position:fixed;top:var(--titlebar-h);right:0;bottom:0;left:0;z-index:40;
+  background:rgba(6,6,10,.55);
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
+  opacity:0;pointer-events:none;transition:opacity .3s ease
+}
+.account-scrim.open{opacity:1;pointer-events:auto}
+
+.account-panel{
+  position:fixed;top:var(--titlebar-h);right:0;bottom:0;z-index:41;
+  width:min(430px,92vw);padding:22px 22px 28px;overflow-y:auto;
+  --panel-translate-x:30px;
+  background:linear-gradient(180deg, rgba(20,17,32,.98), rgba(10,9,16,.99));
+  border-left:1px solid rgba(125,92,255,.22);
+  box-shadow:-24px 0 60px rgba(0,0,0,.45)
+}
+body.vanilla-mode .account-panel{
+  border-left-color:rgba(83,216,111,.24);
+  background:linear-gradient(180deg, rgba(14,26,18,.98), rgba(9,14,11,.99))
+}
+.account-panel-head{display:flex;align-items:flex-start;gap:12px;margin-bottom:20px}
+.account-panel-head h3{margin:0;font-size:20px;font-weight:800;color:#fff}
+.account-panel-head p{margin:6px 0 0;font-size:12px;color:var(--muted)}
+.account-close{
+  margin-left:auto;flex-shrink:0;width:32px;height:32px;border-radius:9px;
+  background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+  color:#dde3ff;font-size:15px;cursor:pointer;transition:.18s
+}
+.account-close:hover{background:rgba(255,255,255,.12);color:#fff}
+
+.account-list{display:grid;gap:8px;margin-bottom:4px}
+.account-row{
+  display:flex;align-items:center;gap:12px;width:100%;padding:12px;border-radius:12px;
+  text-align:left;color:inherit;font:inherit;cursor:pointer;transition:.18s;
+  background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.06)
+}
+.account-row:hover{background:rgba(125,92,255,.10);border-color:rgba(125,92,255,.30)}
+.account-row.active{background:rgba(125,92,255,.14);border-color:rgba(168,241,183,.42)}
+body.vanilla-mode .account-row.active{border-color:rgba(83,216,111,.45)}
+.account-row .avatar{width:38px;height:38px;border-radius:12px;font-size:15px}
+.account-row-main{flex:1;min-width:0}
+.account-row-name{
+  font-size:13px;font-weight:700;color:#fff;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap
+}
+.account-row-meta{margin-top:2px;font-size:10.5px;color:var(--muted)}
+.account-badge{
+  flex-shrink:0;padding:4px 8px;border-radius:999px;
+  font-size:9.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase
+}
+.account-badge.offline{background:rgba(255,255,255,.07);color:var(--muted)}
+.account-badge.msa{background:rgba(83,216,111,.16);color:#a8f1b7}
+.account-remove{
+  flex-shrink:0;width:28px;height:28px;border-radius:9px;cursor:pointer;
+  background:transparent;border:1px solid rgba(255,255,255,.08);
+  color:var(--muted);font-size:13px;line-height:1;transition:.18s
+}
+.account-remove:hover{background:rgba(239,106,106,.16);border-color:rgba(239,106,106,.45);color:#ffb3b3}
+
+.account-block{margin-top:20px;padding-top:18px;border-top:1px solid rgba(255,255,255,.06)}
+.account-block-title{
+  margin-bottom:10px;font-size:11px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:#a8f1b7
+}
+.account-add-row{display:flex;gap:8px}
+.account-add-row .text-input{flex:1;min-width:0}
+.account-hint{margin-top:8px;font-size:11px;color:var(--muted)}
+.account-empty{padding:14px;border-radius:12px;text-align:center;font-size:12px;color:var(--muted);
+  background:rgba(255,255,255,.02);border:1px dashed rgba(255,255,255,.10)}
+
+/* Вход Microsoft: либо кнопка, либо код подтверждения */
+.msa-code{
+  padding:16px;border-radius:12px;text-align:center;color:#fff;
+  font-family:ui-monospace,Consolas,monospace;font-size:26px;font-weight:800;letter-spacing:.22em;
+  background:rgba(125,92,255,.14);border:1px dashed rgba(125,92,255,.45)
+}
+.msa-steps{margin-top:12px;font-size:12px;line-height:1.65;color:var(--muted)}
+.msa-steps a{color:#cbbcff}
+.msa-actions{display:flex;gap:8px;margin-top:12px}
+.msa-status{display:flex;align-items:center;gap:8px;margin-top:12px;font-size:12px;color:var(--muted)}
+.msa-dot{width:7px;height:7px;border-radius:50%;background:var(--accent);animation:msaPulse 1.2s ease-in-out infinite}
+@keyframes msaPulse{0%,100%{opacity:.35}50%{opacity:1}}
+.msa-error{margin-top:12px;font-size:12px;line-height:1.55;color:#ffb3b3}
+
+.mode-switch{position:absolute;top:14px;right:18px;display:flex;gap:8px;z-index:4}
+.mode-btn{
+  min-width:112px;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.05);color:#dde3ff;
+  border:1px solid rgba(255,255,255,.08);font-size:12px;font-weight:800;cursor:pointer;transition:.2s
+}
+.mode-btn:hover{transform:translateY(-1px);color:#fff}
+.mode-btn.active{
+  background:linear-gradient(90deg, rgba(125,92,255,.34), rgba(125,92,255,.16));color:#fff;border-color:rgba(125,92,255,.26)
+}
+.mode-btn.vanilla-active{
+  background:linear-gradient(90deg, rgba(83,216,111,.34), rgba(83,216,111,.16));
+  border-color:rgba(83,216,111,.30);color:#fff
+}
+
+body.vanilla-mode .content{border-color:var(--green-border)}
+body.vanilla-mode .sidebar{border-color:var(--green-border)}
+body.vanilla-mode .hero-badge{background:rgba(83,216,111,.16);color:var(--green-soft)}
+body.vanilla-mode .launch-btn{background:linear-gradient(90deg,#53d86f,#2fa84a);box-shadow:0 12px 38px rgba(83,216,111,.26)}
+body.vanilla-mode .progress-track i{background:linear-gradient(90deg,#53d86f,#9bf5ac)}
+body.vanilla-mode .summary-card strong,
+body.vanilla-mode #loaderLabel,
+body.vanilla-mode .section-label,
+body.vanilla-mode .brand-logo{color:var(--green-soft)}
+body.vanilla-mode .brand-logo{
+  background:linear-gradient(90deg,#53d86f,#9bf5ac);
+  -webkit-background-clip:text;background-clip:text;color:transparent
+}
+body.vanilla-mode .nav-btn.active{
+  background:linear-gradient(90deg, rgba(83,216,111,.24), rgba(83,216,111,.08));
+  box-shadow:inset 0 0 0 1px rgba(83,216,111,.12)
+}
+body.vanilla-mode .nav-btn.active::before{background:var(--green)}
+body.vanilla-mode .mode-btn.active{
+  background:linear-gradient(90deg, rgba(83,216,111,.34), rgba(83,216,111,.16));
+  border-color:rgba(83,216,111,.30)
+}
+
+.page{display:none;height:100%;padding:62px 34px 26px;overflow:auto}
+.page.active{display:block;animation:pageSwap .36s ease both}
+.page::-webkit-scrollbar{width:8px}
+.page::-webkit-scrollbar-thumb{background:rgba(125,92,255,.26);border-radius:999px}
+body.vanilla-mode .page::-webkit-scrollbar-thumb{background:rgba(83,216,111,.28)}
+
+.hero-card,.music-card,.mods-section,.mod-detail,.settings-card{
+  background:rgba(13,14,22,.48);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(9px);
+  transition:transform .28s ease,border-color .24s ease,background .24s ease,box-shadow .24s ease
+}
+.hero-card:hover,.music-card:hover,.mods-section:hover,.mod-detail:hover,.settings-card:hover{transform:translateY(-1px)}
+body.vanilla-mode .hero-card,
+body.vanilla-mode .music-card,
+body.vanilla-mode .mods-section,
+body.vanilla-mode .mod-detail,
+body.vanilla-mode .settings-card{border-color:var(--green-border)}
+
+.hero-card{padding:28px 28px 22px;max-width:820px}
+.hero-badge{
+  display:inline-flex;align-items:center;padding:8px 11px;border-radius:999px;background:rgba(125,92,255,.12);
+  color:#ddd2ff;font-size:11px;font-weight:800;letter-spacing:.08em;text-transform:uppercase
+}
+.hero-card h1{font-size:52px;font-weight:900;line-height:1.04;margin-top:16px;text-shadow:0 8px 28px rgba(0,0,0,.28);color:#fff}
+.hero-card p{max-width:620px;font-size:15px;line-height:1.55;color:#e4e8ff;margin-top:12px}
+.hero-actions{display:flex;align-items:center;gap:18px;flex-wrap:wrap;margin-top:24px}
+.launch-btn{
+  padding:16px 34px;border-radius:16px;background:linear-gradient(90deg,var(--accent),var(--accent-soft));color:#fff;
+  font-size:20px;font-weight:900;cursor:pointer;box-shadow:0 12px 38px rgba(125,92,255,.30);transition:.2s
+}
+.launch-btn:hover{transform:translateY(-2px)}
+.launch-btn.small{font-size:16px;padding:14px 24px}
+.launch-meta{display:grid;gap:4px}
+.launch-meta b{font-size:20px;color:#fff}
+.launch-meta span{font-size:12px;color:#d8ddfb}
+
+.loader-panel{margin-top:16px}
+.loader-toggle{
+  padding:11px 14px;border-radius:12px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;font-weight:700
+}
+.loader-drawer{
+  margin-top:10px;display:none;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px
+}
+.loader-drawer.open{display:grid}
+.loader-option,.inline-loader-chip{
+  padding:12px 14px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.06);
+  color:#fff;cursor:pointer;transition:.16s
+}
+.loader-option strong{display:block;font-size:12px;color:#fff}
+.loader-option span{display:block;margin-top:5px;font-size:11px;color:#d1d8f4}
+.loader-option.active,.inline-loader-chip.active{
+  border-color:rgba(125,92,255,.28);background:rgba(125,92,255,.16)
+}
+body.vanilla-mode .loader-option.active,
+body.vanilla-mode .inline-loader-chip.active{border-color:rgba(83,216,111,.30);background:rgba(83,216,111,.14)}
+.inline-loader-list{display:flex;gap:8px;flex-wrap:wrap}
+.inline-loader-chip{font-size:12px}
+
+.version-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:22px}
+.summary-card{padding:14px 16px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.05)}
+.summary-card strong{display:block;font-size:16px;color:#fff}
+.summary-card span{display:block;margin-top:4px;font-size:11px;color:#d3d9f4}
+
+.progress-wrap{margin-top:20px}
+.progress-track{height:8px;border-radius:999px;background:rgba(255,255,255,.10);overflow:hidden}
+.progress-track i{
+  display:block;height:100%;width:0;background:linear-gradient(90deg,var(--accent),var(--accent-soft));border-radius:999px;transition:width .2s ease
+}
+.progress-text{margin-top:8px;font-size:12px;color:#d7defd}
+.text-link{margin-top:10px;background:none;color:#e0d8ff;font-size:12px;cursor:pointer;text-decoration:underline}
+.logbox{
+  margin-top:10px;height:0;overflow:hidden;background:rgba(8,9,14,.74);border-radius:9px;border:1px solid transparent;
+  font:11px Consolas,monospace;color:#e3e7ff;transition:height .24s ease,padding .24s ease,border-color .24s ease
+}
+.logbox.open{height:150px;padding:10px 12px;border-color:rgba(125,92,255,.18);overflow:auto}
+
+.music-card{margin-top:16px;max-width:820px;padding:18px 20px}
+.music-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
+.music-title{font-size:16px;font-weight:800;color:#fff}
+.music-sub{margin-top:4px;font-size:12px;color:#d5dcfc}
+.music-badges{display:flex;gap:8px;flex-wrap:wrap}
+.chip{
+  display:inline-flex;align-items:center;padding:6px 10px;border-radius:999px;font-size:10px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;
+  cursor:pointer;transition:all 0.2s;background:transparent;border:1px solid transparent
+}
+.chip.green{background:rgba(83,216,111,.14);color:var(--green-soft)}
+.chip.violet{background:rgba(125,92,255,.14);color:#ded2ff}
+.chip.info{background:rgba(255,255,255,.08);color:#f0f4ff}
+.chip.active{
+  background:rgba(255,255,255,0.15);
+  box-shadow:0 0 0 1px currentColor inset
+}
+.chip:hover{
+  background:rgba(255,255,255,0.1)
+}
+.music-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:14px}
+.mini-btn{padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.06);color:#fff;cursor:pointer;transition:.16s}
+.mini-btn:hover{background:rgba(125,92,255,.22)}
+body.vanilla-mode .mini-btn:hover{background:rgba(83,216,111,.18)}
+.music-volume{display:flex;align-items:center;gap:10px;flex:1;min-width:260px}
+.music-volume span{font-size:12px;color:#d7defc}
+.music-volume input{flex:1;accent-color:var(--accent)}
+body.vanilla-mode .music-volume input{accent-color:var(--green)}
+.music-volume b{font-size:12px;min-width:44px;text-align:right;color:#fff}
+.music-status{margin-top:12px;font-size:12px;color:#d7defc}
+
+.mods-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}
+.mods-head h2{font-size:38px;font-weight:900;color:#fff}
+.mods-head p{margin-top:8px;font-size:13px;color:#dbe2ff}
+.mods-head a{font-size:13px;color:#e3d9ff;text-decoration:none}
+
+.mods-toolbar{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.mods-toolbar input{flex:1;min-width:200px}
+.mods-toolbar input,.text-input,.select-input{
+  background:rgba(12,13,20,.86);border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:#fff
+}
+.mods-toolbar input::placeholder,.text-input::placeholder{color:#c5ccef}
+.ghost-btn{
+  padding:12px 16px;border-radius:12px;background:rgba(125,92,255,.16);border:1px solid rgba(125,92,255,.18);
+  color:#f0eaff;font-weight:700;cursor:pointer;transition:.16s
+}
+.ghost-btn:hover{transform:translateY(-1px);background:rgba(125,92,255,.24)}
+body.vanilla-mode .ghost-btn{
+  background:rgba(83,216,111,.12);border-color:rgba(83,216,111,.18);color:#dfffe6
+}
+body.vanilla-mode .ghost-btn:hover{background:rgba(83,216,111,.20)}
+
+.mods-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;margin-top:16px;min-height:0}
+.mods-column{display:grid;gap:16px;min-height:0}
+.mods-section{padding:18px}
+.mods-section-title{font-size:14px;font-weight:800;color:#fff;margin-bottom:12px}
+.mods-list,.downloaded-list,.browser-results{display:grid;gap:10px}
+.browser-mod-row{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;
+  padding:14px 15px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);
+  transition:transform .2s ease,border-color .2s ease,background .2s ease
+}
+.browser-mod-row:hover{transform:translateY(-1px);border-color:rgba(125,92,255,.24);background:rgba(255,255,255,.06)}
+body.vanilla-mode .browser-mod-row:hover{border-color:rgba(83,216,111,.24)}
+.browser-mod-row.incompatible{opacity:.78;border-color:rgba(255,136,149,.16)}
+.browser-mod-left{display:grid;gap:8px}
+.browser-mod-name{font-size:14px;font-weight:800;color:#fff}
+.browser-mod-meta{margin-top:5px;font-size:11px;color:#d4daf9;line-height:1.45}
+.browser-mod-tags{display:flex;gap:8px;flex-wrap:wrap}
+.browser-mod-versions{font-size:11px;color:#bfc6e8;line-height:1.4}
+.browser-mod-actions{display:grid;gap:8px;justify-items:end}
+.browser-install-btn{white-space:nowrap}
+.browser-link{font-size:11px;color:#fff;text-decoration:none;opacity:.9}
+.browser-link:hover{opacity:1;text-decoration:underline}
+.browser-empty{
+  padding:22px 16px;border-radius:12px;background:rgba(255,255,255,.04);
+  border:1px dashed rgba(255,255,255,.1);color:#d8dffb;font-size:13px
+}
+.mod-row{
+  display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;
+  padding:13px 14px;border-radius:12px;background:var(--card);border:1px solid transparent;cursor:pointer;transition:.16s;color:#fff
+}
+.mod-row:hover{border-color:rgba(125,92,255,.22);transform:translateX(2px)}
+.mod-row.active{border-color:rgba(125,92,255,.34);background:rgba(125,92,255,.12)}
+body.vanilla-mode .mod-row.active{border-color:rgba(83,216,111,.30);background:rgba(83,216,111,.10)}
+.mod-bullet{
+  width:38px;height:38px;border-radius:12px;background:linear-gradient(135deg,#2b2543,#191627);display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff
+}
+.mod-main{min-width:0}
+.mod-name{font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#fff}
+.mod-sub{margin-top:4px;font-size:11px;color:#d0d7f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mod-flags{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+.flag{
+  display:inline-flex;align-items:center;padding:6px 9px;border-radius:999px;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em
+}
+.flag.ok{background:rgba(83,216,111,.12);color:var(--green-soft)}
+.flag.warn{background:rgba(245,204,114,.12);color:var(--warn)}
+.flag.bad{background:rgba(255,136,149,.12);color:var(--bad)}
+.flag.info{background:rgba(125,92,255,.12);color:#ddd1ff}
+
+.mod-detail{padding:20px;display:flex;flex-direction:column;gap:12px}
+.detail-icon{
+  width:66px;height:66px;border-radius:16px;background:linear-gradient(135deg,#2a2440,#1a1628);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:#fff
+}
+.mod-detail h3{font-size:24px;font-weight:900;color:#fff}
+.detail-meta{font-size:12px;color:#d5dcfb}
+.detail-desc{font-size:13px;line-height:1.55;color:#edf1ff;flex:1;max-height:180px;overflow-y:auto;padding-right:4px;word-break:break-word}
+.detail-desc::-webkit-scrollbar{width:6px}
+.detail-desc::-webkit-scrollbar-thumb{background:rgba(124,92,255,.35);border-radius:6px}
+.detail-actions{display:flex;gap:8px;flex-wrap:wrap}
+.detail-flags{display:flex;gap:8px;flex-wrap:wrap}
+#detailModrinthLink{font-size:12px;color:#8b9dff;text-decoration:none;align-self:flex-start}
+#detailModrinthLink:hover{text-decoration:underline}
+
+.settings-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.settings-card{padding:20px}
+.settings-card h3{font-size:18px;font-weight:900;color:#fff}
+.setting-row,.toggle-row{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:16px}
+.setting-row span,.toggle-row span{font-size:13px;font-weight:700;color:#fff}
+.setting-row input[type=range]{flex:1;accent-color:var(--accent)}
+body.vanilla-mode .setting-row input[type=range],
+body.vanilla-mode .toggle-row input[type=checkbox]{accent-color:var(--green)}
+.setting-note{margin-top:10px;font-size:12px;color:#d5dcfb}
+.toggle-row input[type=checkbox]{width:18px;height:18px;accent-color:var(--accent)}
+.settings-actions{margin-top:18px}
+
+.toast-stack{position:fixed;right:18px;bottom:18px;z-index:9;display:grid;gap:10px;max-width:320px}
+.toast{
+  padding:12px 14px;border-radius:12px;border:1px solid rgba(255,255,255,.06);background:rgba(11,11,18,.92);
+  box-shadow:var(--shadow);font-size:13px;color:#fff;animation:toastIn .24s ease both
+}
+.toast.ok{border-color:rgba(83,216,111,.18)}
+.toast.err{border-color:rgba(255,136,149,.18)}
+
+.reveal{animation:fadeUp .45s ease both}
+
+@keyframes blink{50%{opacity:0}}
+@keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+@keyframes fadeSlide{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pageSwap{from{opacity:0;transform:translateY(14px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+
+@media(max-width:1120px){
+  .app-shell{grid-template-columns:200px 1fr}
+  .mods-layout{grid-template-columns:1fr}
+}
+@media(max-width:860px){
+  .app-shell{grid-template-columns:1fr;padding:8px}
+  .sidebar{display:none}
+  .content{border-radius:20px}
+  .page{padding:64px 18px 20px}
+  .settings-grid,.version-summary,.mods-toolbar,.loader-drawer{grid-template-columns:1fr}
+  .music-controls{flex-direction:column;align-items:stretch}
+}
+
+/* ── performance / GPU hints ── */
+.bg{will-change:transform;transform:scale(1.02) translateZ(0);backface-visibility:hidden}
+.content{will-change:transform;transform:translateZ(0);backface-visibility:hidden}
+.app-shell{transform:translateZ(0)}
+.hero-card,.music-card,.mods-section,.mod-detail,.settings-card{will-change:transform}
+
+/* ── mod browser icons ── */
+.browser-mod-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:12px;align-items:center;padding:14px 15px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);transition:transform .2s ease,border-color .2s ease,background .2s ease}
+.browser-mod-icon-wrap{width:48px;height:48px;flex-shrink:0}
+.browser-mod-icon{width:48px;height:48px;border-radius:9px;object-fit:cover;display:block}
+.browser-mod-icon-letter{width:48px;height:48px;border-radius:9px;background:linear-gradient(135deg,#2b2543,#191627);display:flex;align-items:center;justify-content:center;font-size:20px;font-weight:900;color:#fff}
+.mod-bullet{width:38px;height:38px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-weight:800;font-size:16px;color:#fff;flex-shrink:0;background:linear-gradient(135deg,var(--accent),#1a1628)}
+
+/* (legacy #bgFadeOverlay removed — replaced by the #bgFade crossfade video layer) */
+
+
+/* ── spotify section (compact trigger) ── */
+.spotify-section{margin-top:14px;padding-top:14px;border-top:1px solid rgba(255,255,255,.06)}
+.spotify-row{display:flex;align-items:center;gap:10px}
+.spotify-label{flex:1;font-size:12px;font-weight:700;color:#c0c8e8}
+.spotify-open-btn{font-size:12px;padding:8px 14px;border-radius:9px;background:rgba(29,185,84,.14);border:1px solid rgba(29,185,84,.24);color:#9de8b4;cursor:pointer;transition:.18s}
+.spotify-open-btn:hover{background:rgba(29,185,84,.24);color:#c9fada}
+
+/* ── Spotify modal dialog ── */
+.sp-modal-backdrop{
+  position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;
+  background:rgba(4,5,8,.72);backdrop-filter:blur(8px);
+  opacity:0;pointer-events:none;transition:opacity .22s ease
+}
+.sp-modal-backdrop.open{opacity:1;pointer-events:auto}
+.sp-modal{
+  width:440px;max-width:calc(100vw - 32px);
+  background:linear-gradient(160deg,rgba(14,15,24,.97),rgba(9,10,16,.98));
+  border:1px solid rgba(29,185,84,.22);border-radius:20px;
+  box-shadow:0 28px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.04);
+  overflow:hidden;animation:spModalIn .26s cubic-bezier(.34,1.56,.64,1) both
+}
+@keyframes spModalIn{from{opacity:0;transform:translateY(18px) scale(.97)}to{opacity:1;transform:none}}
+.sp-modal-header{
+  display:flex;align-items:center;gap:14px;padding:22px 22px 16px;
+  border-bottom:1px solid rgba(255,255,255,.06)
+}
+.sp-modal-icon{
+  width:52px;height:52px;border-radius:12px;background:rgba(29,185,84,.12);
+  border:1px solid rgba(29,185,84,.24);display:flex;align-items:center;justify-content:center;flex-shrink:0
+}
+.sp-modal-titles{flex:1;min-width:0}
+.sp-modal-titles h2{font-size:18px;font-weight:900;color:#fff;margin:0}
+.sp-modal-titles p{margin-top:4px;font-size:12px;color:#9eb0c8}
+.sp-modal-close{
+  width:32px;height:32px;border-radius:9px;background:rgba(255,255,255,.06);
+  border:none;color:#b0bcd8;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;
+  transition:.16s;flex-shrink:0
+}
+.sp-modal-close:hover{background:rgba(255,80,80,.18);color:#ff8a8a}
+.sp-modal-body{padding:18px 22px}
+.sp-info-block{
+  display:grid;gap:9px;margin-bottom:18px;padding:14px 16px;
+  background:rgba(29,185,84,.06);border:1px solid rgba(29,185,84,.14);border-radius:12px}
+.sp-info-row{display:flex;align-items:center;gap:10px;font-size:12px;color:#c0d0c8}
+.sp-info-dot{
+  width:7px;height:7px;border-radius:50%;flex-shrink:0
+}
+.sp-info-dot.green{background:#1DB954;box-shadow:0 0 8px rgba(29,185,84,.6)}
+.sp-input-label{display:block;margin-bottom:8px;font-size:12px;font-weight:700;color:#e0e8ff}
+.sp-input-row{display:flex;gap:8px}
+.sp-input{
+  flex:1;background:rgba(8,9,14,.9);border:1px solid rgba(29,185,84,.28);border-radius:12px;
+  padding:11px 14px;color:#fff;font-size:13px;outline:none;transition:.2s
+}
+.sp-input:focus{border-color:rgba(29,185,84,.6);box-shadow:0 0 0 3px rgba(29,185,84,.10)}
+.sp-input::placeholder{color:#5a7080}
+.sp-hint{margin-top:9px;font-size:11px;color:#7a90a8}
+.sp-modal-footer{
+  display:flex;justify-content:flex-end;gap:10px;padding:14px 22px 20px;
+  border-top:1px solid rgba(255,255,255,.05)
+}
+.sp-btn-cancel{
+  padding:11px 18px;border-radius:12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);
+  color:#b0bcd8;font-size:13px;font-weight:700;cursor:pointer;transition:.16s
+}
+.sp-btn-cancel:hover{background:rgba(255,255,255,.10);color:#fff}
+.sp-btn-open{
+  display:flex;align-items:center;gap:8px;
+  padding:11px 22px;border-radius:12px;
+  background:linear-gradient(90deg,#1DB954,#17a348);
+  border:none;color:#fff;font-size:13px;font-weight:800;cursor:pointer;
+  box-shadow:0 8px 24px rgba(29,185,84,.28);transition:.18s
+}
+.sp-btn-open:hover{transform:translateY(-1px);box-shadow:0 12px 32px rgba(29,185,84,.38)}
+
+/* ── Launcher open fade-in (smooth hand-off from the welcome splash) ───────── */
+body { animation: launcherIn .45s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes launcherIn { from { opacity:0; transform:scale(.985) } to { opacity:1; transform:scale(1) } }
+body.closing { animation: launcherOut .5s cubic-bezier(.4,0,.2,1) forwards; }
+@keyframes launcherOut { to { opacity:0; transform:scale(.97) } }
+
+/* ── Goodbye overlay ───────────────────────────────────────────────────────── */
+#goodbyeOverlay {
+  position:fixed; inset:0; z-index:9999;
+  display:flex; align-items:center; justify-content:center;
+  background:radial-gradient(120% 120% at 50% 40%, #16131f 0%, #0b0b0f 75%);
+  opacity:0; pointer-events:none;
+  transition:opacity .3s ease;
+}
+#goodbyeOverlay.show { opacity:1; pointer-events:all; }
+.goodbye-inner { text-align:center; transform:translateY(8px); animation:goodbyeRise .5s cubic-bezier(.2,.8,.2,1) forwards; }
+@keyframes goodbyeRise { to { transform:translateY(0) } }
+.goodbye-title {
+  font-size:38px; font-weight:800; letter-spacing:.5px;
+  background:linear-gradient(90deg,#fff,#b9a6ff,#fff); background-size:200% auto;
+  -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent;
+  animation:shine 2.2s linear infinite;
+}
+.goodbye-sub { margin-top:10px; font-size:13px; letter-spacing:2px; color:#6c6780; text-transform:uppercase; }
+@keyframes shine { to { background-position:200% center } }
+
+/* ── Spring cursor blur follower ──────────────────────────────────────────────
+   A soft circle that trails the mouse with spring physics and adds extra
+   backdrop blur under itself. Pointer-events none so it never blocks clicks. */
+#cursorBlur {
+  position: fixed; top: 0; left: 0;
+  width: 260px; height: 260px;
+  margin: -130px 0 0 -130px;      /* centre on the cursor point */
+  border-radius: 50%;
+  pointer-events: none;
+  /* Above the background video (z 0), BELOW the UI (app-shell z 2) — the blur
+     only affects the background and never covers the interface. */
+  z-index: 1;
+  opacity: 0;
+  transition: opacity .35s ease;
+  backdrop-filter: blur(9px) saturate(1.15);
+  -webkit-backdrop-filter: blur(9px) saturate(1.15);
+  background: radial-gradient(circle, rgba(124,92,255,.12) 0%, rgba(124,92,255,0) 68%);
+  /* fade the blur out toward the edges so there's no hard circle seam */
+  -webkit-mask: radial-gradient(circle, #000 34%, transparent 66%);
+  mask: radial-gradient(circle, #000 34%, transparent 66%);
+  will-change: transform;
+}
+#cursorBlur.visible { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { #cursorBlur { display: none; } }
+
+/* ── Эффекты: волна по клику и фон при наведении ──────────────────────────────
+   Волна рисуется ПОВЕРХ интерфейса аддитивным смешиванием — она должна читаться
+   как свет, скользящий по окну, а не как слой под панелями, где её не видно.
+   pointer-events:none обязателен: без него холст перехватит вообще все клики. */
+#fxWave {
+  position: fixed;
+  inset: 0;
+  z-index: 45;              /* выше панели аккаунтов (41), ниже модалки Spotify (50) */
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+@media (prefers-reduced-motion: reduce) { #fxWave { display: none; } }
+
+/* Холст наведения переезжает внутрь наведённой кнопки. z-index:-1 кладёт его
+   между фоном кнопки и её текстом, поэтому надпись остаётся читаемой, а
+   isolation:isolate не даёт холсту уехать под фон родителя. */
+.fx-host { position: relative; isolation: isolate; }
+#fxHover {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .28s ease;
+  border-radius: inherit;
+}
+@media (prefers-reduced-motion: reduce) { #fxHover { display: none; } }
+
+/* ── Стекло и глубина ─────────────────────────────────────────────────────────
+   Кнопка получает мягкое размытие фона (стекло) и объём: светлая кромка сверху,
+   затемнение снизу, тень под кнопкой. Всё через box-shadow и backdrop-filter,
+   поэтому фоновые градиенты кнопок (активная вкладка, кнопка запуска) не ломаются —
+   background-image здесь не трогается намеренно. */
+button {
+  backdrop-filter: blur(7px) saturate(1.30);
+  -webkit-backdrop-filter: blur(7px) saturate(1.30);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .10),
+    inset 0 -8px 14px rgba(0, 0, 0, .16),
+    0 4px 14px rgba(0, 0, 0, .32);
+  transition: box-shadow .2s ease, background .2s ease, color .2s ease,
+              transform .2s ease, border-color .2s ease;
+}
+button:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .18),
+    inset 0 -8px 14px rgba(0, 0, 0, .18),
+    0 8px 22px rgba(0, 0, 0, .44);
+}
+/* Нажатие — кнопка словно уходит вглубь: блик сверху пропадает, тень падает */
+button:active {
+  box-shadow:
+    inset 0 2px 6px rgba(0, 0, 0, .38),
+    inset 0 -3px 8px rgba(0, 0, 0, .14),
+    0 2px 8px rgba(0, 0, 0, .30);
+}
+button:disabled {
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .04), 0 2px 8px rgba(0, 0, 0, .20);
+}
+
+/* Крупные поверхности — то же стекло, но мягче: они и так лежат на фоне */
+.hero-card, .music-card, .settings-card, .mods-section, .mod-detail,
+.profile-card, .versions-card, .pulse-lock-card {
+  backdrop-filter: blur(10px) saturate(1.22);
+  -webkit-backdrop-filter: blur(10px) saturate(1.22);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, .07),
+    inset 0 -14px 30px rgba(0, 0, 0, .13),
+    0 10px 30px rgba(0, 0, 0, .28);
+}
+/* Кнопки заголовка окна оставляем плоскими: это системные кнопки, объём им не идёт */
+.title-btn, .title-btn:hover, .title-btn:active {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+}
+
+/* В режиме Vanilla кромка стекла зеленеет вместе с остальной темой */
+body.vanilla-mode button {
+  box-shadow:
+    inset 0 1px 0 rgba(196, 255, 210, .13),
+    inset 0 -8px 14px rgba(0, 0, 0, .18),
+    0 4px 14px rgba(0, 0, 0, .32);
+}
+
+/* ── Уровни производительности ────────────────────────────────────────────────
+   Уровень выставляется в <head> до первой отрисовки (см. index.html).
+   backdrop-filter — самый дорогой эффект интерфейса: он заставляет композитор
+   перечитывать и размывать фон за элементом каждый кадр, а у нас под ним ещё
+   и видео, и волна. Там, где не тянет, убираем размытие, но оставляем тени —
+   объём и стеклянный вид сохраняются, цена уходит. */
+html[data-perf="low"] button,
+html[data-perf="low"] .hero-card,
+html[data-perf="low"] .music-card,
+html[data-perf="low"] .settings-card,
+html[data-perf="low"] .mods-section,
+html[data-perf="low"] .mod-detail,
+html[data-perf="low"] .profile-card,
+html[data-perf="low"] .versions-card,
+html[data-perf="low"] .pulse-lock-card,
+html[data-perf="low"] .sidebar,
+html[data-perf="low"] .content,
+html[data-perf="low"] .sp-modal-backdrop,
+html[data-perf="low"] .modal,
+html[data-perf="low"] .account-scrim {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+/* Круг за курсором — тоже backdrop-filter, причём перерисовывается каждый кадр */
+html[data-perf="low"] #cursorBlur { display: none; }
+html[data-perf="mid"] #cursorBlur { width: 200px; height: 200px; margin: -100px 0 0 -100px; }
+/* На слабой машине кольца считаем по более крупной сетке — их всё равно видно */
+html[data-perf="low"] #fxWave { mix-blend-mode: normal; opacity: .9; }
+
+/* ── Panel reveal — slide + fade + cross-blur ──────────────────────────────────
+   pointer-events обязателен и был потерян при переносе паттерна из
+   design/panel reveal.txt. Без него закрытая панель невидима (opacity 0), но
+   продолжает ловить клики: панель аккаунтов лежит справа во всю высоту поверх
+   заголовка, и кнопки свернуть/закрыть вместе с переключателем режима перестают
+   нажиматься. Правило есть в паттерне — не выбрасывать при следующих правках. */
+.t-panel-slide {
+  --panel-open-dur: 400ms;
+  --panel-close-dur: 300ms;
+  --panel-translate-y: 26px;
+  --panel-blur: 3px;
+  --panel-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  transform: translateY(var(--panel-translate-y));
+  opacity: 0;
+  filter: blur(var(--panel-blur));
+  pointer-events: none;
+  transition:
+    transform var(--panel-close-dur) var(--panel-ease),
+    opacity   var(--panel-close-dur) var(--panel-ease),
+    filter    var(--panel-close-dur) var(--panel-ease);
+  will-change: transform, opacity, filter;
+}
+.t-panel-slide[data-open="true"] {
+  transform: translateY(0);
+  opacity: 1;
+  filter: blur(0);
+  pointer-events: auto;
+  transition:
+    transform var(--panel-open-dur) var(--panel-ease),
+    opacity   var(--panel-open-dur) var(--panel-ease),
+    filter    var(--panel-open-dur) var(--panel-ease);
+}
+
+/* ── Text reveal — staggered lines rise + de-blur ────────────────────────────── */
+.t-stagger {
+  --stagger-dur: 500ms;
+  --stagger-distance: 12px;
+  --stagger-stagger: 60ms;
+  --stagger-blur: 4px;
+  --stagger-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+.t-stagger-line {
+  display: block;
+  opacity: 0;
+  transform: translateY(var(--stagger-distance));
+  filter: blur(var(--stagger-blur));
+  transition:
+    opacity   var(--stagger-dur) var(--stagger-ease),
+    transform var(--stagger-dur) var(--stagger-ease),
+    filter    var(--stagger-dur) var(--stagger-ease);
+  will-change: transform, opacity, filter;
+}
+.t-stagger-line--2 { transition-delay: var(--stagger-stagger); }
+.t-stagger-line--3 { transition-delay: calc(var(--stagger-stagger) * 2); }
+.t-stagger.is-shown .t-stagger-line {
+  opacity: 1; transform: translateY(0); filter: blur(0);
+}
+@media (prefers-reduced-motion: reduce) {
+  .t-panel-slide, .t-stagger-line { transition: none !important; }
+}
+
+/* ── Music tab panels ────────────────────────────────────────────────────────── */
+.music-tab-panel {
+  display: none;
+  margin-top: 12px;
+  padding: 12px;
+  background: rgba(255,255,255,0.02);
+  border-radius:9px;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.music-tab-panel.active {
+  display: block;
+}
+
+.bytebeat-editor {
+  margin-bottom: 16px;
+}
+.bytebeat-editor textarea {
+  width: 100%;
+  padding: 8px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 6px;
+  color: #e0e0e0;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 13px;
+  resize: vertical;
+}
+.bytebeat-controls {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.bytebeat-presets, .bytebeat-library {
+  margin-top: 16px;
+}
+.bytebeat-presets-title, .bytebeat-library-title {
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 8px;
+}
+.bytebeat-presets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
+}
+.bytebeat-preset-btn {
+  padding: 8px 12px;
+  background: rgba(124,92,255,0.15);
+  border: 1px solid rgba(124,92,255,0.3);
+  border-radius: 6px;
+  color: #c7b3ff;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.bytebeat-preset-btn:hover {
+  background: rgba(124,92,255,0.25);
+  border-color: rgba(124,92,255,0.5);
+}
+
+.bytebeat-library-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.bytebeat-library-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.bytebeat-library-item:hover {
+  background: rgba(255,255,255,0.06);
+}
+.bytebeat-library-actions {
+  display: flex;
+  gap: 6px;
+}
+.bytebeat-library-actions button {
+  padding: 4px 8px;
+  font-size: 11px;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius:6px;
+  color: #c0c0c0;
+  cursor: pointer;
+}
+.bytebeat-library-actions button:hover {
+  background: rgba(255,255,255,0.1);
+}
+
+/* Bytebeat — now playing + transport.
+   The track list was removed on purpose: the tab picks the bytebeat playlist and the
+   arrows skip through it like a player, instead of offering a menu of songs. */
+.bytebeat-now {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  margin-bottom: 12px;
+  background: rgba(124,92,255,0.08);
+  border: 1px solid rgba(124,92,255,0.2);
+  border-radius:9px;
+}
+.bytebeat-now-icon {
+  font-size: 28px;
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.3);
+  border-radius: 6px;
+}
+.bytebeat-now-text {
+  flex: 1;
+  min-width: 0;
+}
+.bytebeat-now-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #e0e0e0;
+  margin-bottom: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bytebeat-now-meta {
+  font-size: 11px;
+  color: rgba(255,255,255,0.5);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bytebeat-transport {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.mini-btn.round {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  line-height: 1;
+}
+.mini-btn.round.primary {
+  width: 48px;
+  height: 48px;
+  font-size: 18px;
+  background: rgba(124,92,255,0.22);
+  border-color: rgba(124,92,255,0.5);
+  color: #d9cfff;
+}
+.mini-btn.round.primary:hover {
+  background: rgba(124,92,255,0.34);
+}
+
+/* Bytebeat Visualizer */
+.bytebeat-visualizer {
+  background: rgba(0,0,0,0.4);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius:9px;
+  padding: 12px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+#bytebeatFFTCanvas {
+  max-width: 100%;
+  height: auto;
+  image-rendering: crisp-edges;
+}
+
+/* Settings Modal */
+/* Модалка настроек bytebeat. Была стилизована в чужой палитре — жёсткий
+   #0F172A, серые рамки, радиус 6px — и выбивалась из всего лаунчера. Плюс
+   .setting-row отсюда же протекал в страницу настроек. Переведено на общие
+   переменные и ту же шкалу закруглений. */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(6, 6, 10, .72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.modal-content {
+  width: 90%;
+  max-width: 560px;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  border: 1px solid rgba(125, 92, 255, .24);
+  background: linear-gradient(160deg, rgba(22,19,34,.97), rgba(11,10,17,.98));
+  box-shadow: 0 28px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.04);
+  animation: spModalIn .26s cubic-bezier(.34,1.56,.64,1) both;
+}
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid rgba(255,255,255,.06);
+}
+.modal-header h3 { margin: 0; font-size: 16px; font-weight: 800; color: #fff; }
+.close-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: rgba(255,255,255,.05);
+  color: var(--muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  transition: background .18s ease, color .18s ease;
+}
+.close-btn:hover { background: rgba(239,106,106,.18); color: #ffb3b3; }
+.modal-body { padding: 18px 20px 22px; overflow-y: auto; }
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+}
+.setting-row:last-child { border-bottom: none; }
+.setting-row label { flex: 1; font-size: 13px; color: var(--muted); }
+.setting-row select,
+.setting-row input[type="range"] {
+  width: 140px;
+  padding: 7px 10px;
+  border-radius: var(--r-sm);
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(0,0,0,.28);
+  color: var(--text);
+  font-size: 13px;
+}
+.setting-row input[type="range"] { width: 110px; padding: 0; background: transparent; border: none; }
+#visualizerHeightLabel { font-size: 12px; color: var(--muted); margin-left: 8px; min-width: 50px; }
+
+.music-files-list {
+  max-height: 200px;
+  overflow-y: auto;
+  margin-bottom: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}

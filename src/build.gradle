@@ -1,0 +1,39 @@
+plugins {
+    id 'java'
+}
+
+group = 'launcher'
+version = '2.0.0'
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'com.google.code.gson:gson:2.10.1'
+}
+
+jar {
+    archiveFileName = 'pulsePLUS-launcher.jar'
+    manifest {
+        attributes 'Main-Class': 'launcher.Main'
+    }
+    from {
+        configurations.runtimeClasspath.collect {
+            it.isDirectory() ? it : zipTree(it)
+        }
+    }
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    // Exclude large binary assets — videos are served from the videos/ folder next to the JAR
+    exclude '**/*.mp4'
+    exclude '**/*.mkv'
+    exclude '**/*.avi'
+    exclude '**/*.mov'
+    // Exclude stray documentation
+    exclude 'DESIGN-NOTES.md'
+}

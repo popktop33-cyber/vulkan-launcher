@@ -1,0 +1,55 @@
+{
+  "name": "vulkan-launcher",
+  "productName": "vulkan launcher",
+  "version": "1.0.0",
+  "description": "vulkan launcher — Minecraft launcher with isolated Vanilla and managed mod compatibility",
+  "author": "vulkan",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "dist": "electron-builder --win nsis",
+    "pack": "electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "com.vulkan.launcher",
+    "productName": "vulkan launcher",
+    "asar": false,
+    "files": [
+      "main.js",
+      "preload.js",
+      "welcome.html",
+      "icon.ico",
+      "icon-vulkan.ico",
+      "icon-vanilla.ico",
+      "package.json",
+      "backend/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "icon.ico",
+      "artifactName": "vulkan-launcher-Setup-${version}.exe"
+    },
+    "nsis": {
+      "include": "installer.nsh",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "vulkan launcher",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false
+    }
+  },
+  "devDependencies": {
+    "electron": "25.7.0",
+    "electron-builder": "^26.0.12"
+  }
+}
