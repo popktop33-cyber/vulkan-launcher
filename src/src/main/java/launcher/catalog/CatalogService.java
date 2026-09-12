@@ -47,18 +47,89 @@ public final class CatalogService {
         return loaded;
     }
 
+    /* ── Группы модов ───────────────────────────────────────────────────────────
+       Один список на оба источника: у Modrinth категории текстовые, у CurseForge
+       числовые, и сводить их на лету — значит показывать пользователю разные
+       наборы чипов при переключении источника.
+
+       У CurseForge поиск принимает только ОДНУ категорию (categoryId), а не
+       набор, поэтому при нескольких выбранных группах в запрос уходит первая.
+       Это ограничение их API, а не наше. */
+    public record CategoryGroup(String id, String label, String modrinth, String curseforge) {}
+
+    private static final List<CategoryGroup> CATEGORIES = List.of(
+        new CategoryGroup("optimization", "Оптимизация",     "optimization",  "6814"),
+        new CategoryGroup("library",      "Библиотеки",      "library",       "421"),
+        new CategoryGroup("technology",   "Технологии",      "technology",    "412"),
+        new CategoryGroup("magic",        "Магия",           "magic",         "419"),
+        new CategoryGroup("worldgen",     "Генерация мира",  "worldgen",      "406"),
+        new CategoryGroup("mobs",         "Мобы",            "mobs",          "411"),
+        new CategoryGroup("adventure",    "Приключения",     "adventure",     "422"),
+        new CategoryGroup("decoration",   "Украшения",       "decoration",    "424"),
+        new CategoryGroup("storage",      "Хранилища",       "storage",       "420"),
+        new CategoryGroup("utility",      "Утилиты",         "utility",       "5191"),
+        new CategoryGroup("food",         "Еда",             "food",          "436"),
+        new CategoryGroup("equipment",    "Снаряжение",      "equipment",     "434")
+    );
+
+    public static List<Map<String, Object>> categories() {
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (CategoryGroup g : CATEGORIES) {
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", g.id());
+            row.put("label", g.label());
+            out.add(row);
+        }
+        return out;
+    }
+
+    /** Числовой id группы для CurseForge — нужен источнику модов. */
+    public static String curseforgeCategory(String id) {
+        CategoryGroup g = category(id);
+        return g == null ? "" : g.curseforge();
+    }
+
+    private static CategoryGroup category(String id) {
+        for (CategoryGroup g : CATEGORIES) {
+            if (g.id().equals(id)) return g;
+        }
+        return null;
+    }
+
     public static List<Map<String, Object>> searchMods(String version, String loader, String query, int limit) throws Exception {
+        return searchMods(version, loader, query, limit, "modrinth", List.of(), 0);
+    }
+
+    /**
+     * Поиск с выбором источника и групп. CurseForge отдаёт ту же форму строки,
+     * поэтому вызывающий код о source больше нигде не думает.
+     *
+     * @param categoryIds выбранные группы (наши id, не исходные)
+     * @param offset      сколько результатов пропустить — для «показать больше»
+     */
+    public static List<Map<String, Object>> searchMods(String version, String loader, String query,
+                                                       int limit, String source,
+                                                       List<String> categoryIds, int offset) throws Exception {
+        if ("curseforge".equalsIgnoreCase(source)) {
+            return CurseForgeSource.search(version, loader, query, limit, categoryIds, offset);
+        }
+        return searchModrinth(version, loader, query, limit, categoryIds, offset);
+    }
+
+    private static List<Map<String, Object>> searchModrinth(String version, String loader, String query,
+                                                               int limit, List<String> categoryIds, int offset) throws Exception {
         String loaderKey = normalizeLoader(loader);
         String versionKey = version == null ? "" : version.trim();
         String queryKey = query == null ? "" : query.trim();
-        String cacheKey = versionKey + "|" + loaderKey + "|" + queryKey + "|" + limit;
+        String cacheKey = versionKey + "|" + loaderKey + "|" + queryKey + "|" + limit
+            + "|" + String.join(",", categoryIds) + "|" + offset;
         long now = System.currentTimeMillis();
         CacheEntry<List<Map<String, Object>>> cached = MOD_CACHE.get(cacheKey);
         if (cached != null && now - cached.timeMs < MODS_TTL_MS) {
             return cached.value;
         }
 
-        List<Map<String, Object>> loaded = loadMods(versionKey, loaderKey, queryKey, limit);
+        List<Map<String, Object>> loaded = loadMods(versionKey, loaderKey, queryKey, limit, categoryIds, offset);
         MOD_CACHE.put(cacheKey, new CacheEntry<>(now, loaded));
         return loaded;
     }
@@ -210,16 +281,40 @@ public final class CatalogService {
         }
     }
 
-    private static List<Map<String, Object>> loadMods(String version, String loader, String query, int limit) {
+    private static List<Map<String, Object>> loadMods(String version, String loader, String query,
+                                                      int limit, List<String> categoryIds, int offset) {
         if (loader.isBlank() || "vanilla".equals(loader)) {
             return List.of();
         }
         try {
-            String resolvedQuery = query.isBlank() ? "optimization" : query;
-            String facets = "[[\"versions:" + version + "\"],[\"categories:" + loader + "\"],[\"project_type:mod\"]]";
+            /* Пустой запрос означал «покажи хоть что-нибудь», и туда подставлялось
+               слово optimization. С выбранной группой это ломало фильтр: текст
+               перебивал категорию, и «Магия» возвращала один мод про оптимизацию.
+               Когда группа выбрана, поиск идёт по пустому запросу — тогда работает
+               именно фасет. */
+            String resolvedQuery = !query.isBlank() ? query
+                : (categoryIds != null && !categoryIds.isEmpty() ? "" : "optimization");
+
+            /* Группы внутри одной группы фасетов Modrinth складывает по ИЛИ,
+               а сами группы между собой — по И. Отсюда две отдельные скобки:
+               загрузчик и категории не должны смешиваться. */
+            StringBuilder facets = new StringBuilder("[[\"versions:").append(version)
+                .append("\"],[\"categories:").append(loader)
+                .append("\"],[\"project_type:mod\"]");
+            List<String> modrinthCats = new ArrayList<>();
+            for (String id : categoryIds) {
+                CategoryGroup g = category(id);
+                if (g != null) modrinthCats.add("\"categories:" + g.modrinth() + "\"");
+            }
+            if (!modrinthCats.isEmpty()) {
+                facets.append(",[").append(String.join(",", modrinthCats)).append("]");
+            }
+            facets.append("]");
+
             String url = "https://api.modrinth.com/v2/search?query=" + encode(resolvedQuery)
-                + "&facets=" + encode(facets)
+                + "&facets=" + encode(facets.toString())
                 + "&limit=" + Math.max(1, Math.min(limit, 30))
+                + "&offset=" + Math.max(0, offset)
                 + "&index=relevance";
             JsonObject root = readJsonObject(url);
             JsonArray hits = root.getAsJsonArray("hits");
@@ -235,7 +330,9 @@ public final class CatalogService {
                 row.put("desc", stringOr(hit, "description", ""));
                 row.put("slug", slug);
                 row.put("url", "https://modrinth.com/mod/" + slug);
+                // У Modrinth иконка уже 96px WebP — одна и та же для списка и панели
                 row.put("iconUrl", stringOr(hit, "icon_url", ""));
+                row.put("iconSmall", stringOr(hit, "icon_url", ""));
                 row.put("downloads", hit.has("downloads") ? hit.get("downloads").getAsLong() : 0L);
                 row.put("loaders", collectLoaderCategories(hit.getAsJsonArray("categories")));
                 row.put("versions", collectStrings(hit.getAsJsonArray("versions")));
@@ -247,6 +344,87 @@ public final class CatalogService {
         } catch (Exception ignored) {
             return List.of();
         }
+    }
+
+    /* ── Полное описание и список версий ────────────────────────────────────────
+       Форма ответа у обоих источников одна и та же, различается только формат
+       тела: Modrinth отдаёт markdown, CurseForge — готовый HTML. Разбирает его
+       фронтенд, поэтому здесь тело уходит как есть, с пометкой format. */
+
+    public static Map<String, Object> projectDetail(String source, String slug) throws Exception {
+        if ("curseforge".equalsIgnoreCase(source)) {
+            return CurseForgeSource.project(slug);
+        }
+        JsonObject p = readJsonObject("https://api.modrinth.com/v2/project/" + encode(slug));
+        Map<String, Object> out = new LinkedHashMap<>();
+        out.put("source", "modrinth");
+        out.put("name", stringOr(p, "title", slug));
+        out.put("slug", stringOr(p, "slug", slug));
+        out.put("iconUrl", stringOr(p, "icon_url", ""));
+        out.put("url", "https://modrinth.com/mod/" + stringOr(p, "slug", slug));
+        out.put("downloads", p.has("downloads") ? p.get("downloads").getAsLong() : 0L);
+        out.put("summary", stringOr(p, "description", ""));
+        out.put("format", "markdown");
+        out.put("body", stringOr(p, "body", ""));
+        return out;
+    }
+
+    public static List<Map<String, Object>> projectVersions(String source, String slug,
+                                                            String mcVersion, String loader) throws Exception {
+        if ("curseforge".equalsIgnoreCase(source)) {
+            return CurseForgeSource.versions(slug, mcVersion, loader);
+        }
+
+        StringBuilder url = new StringBuilder("https://api.modrinth.com/v2/project/")
+            .append(encode(slug)).append("/version");
+        List<String> params = new ArrayList<>();
+        if (mcVersion != null && !mcVersion.isBlank()) {
+            params.add("game_versions=" + encode("[\"" + mcVersion + "\"]"));
+        }
+        String family = normalizeLoader(loader);
+        if (family != null && !family.isBlank()) {
+            params.add("loaders=" + encode("[\"" + family + "\"]"));
+        }
+        if (!params.isEmpty()) url.append('?').append(String.join("&", params));
+
+        JsonArray versions = readJsonArray(url.toString());
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (JsonElement el : versions) {
+            if (!el.isJsonObject()) continue;
+            JsonObject v = el.getAsJsonObject();
+            JsonArray files = v.getAsJsonArray("files");
+            if (files == null || files.isEmpty()) continue;
+
+            // Основной файл, а если такого нет — первый попавшийся
+            JsonObject file = files.get(0).getAsJsonObject();
+            for (JsonElement fEl : files) {
+                JsonObject f = fEl.getAsJsonObject();
+                if (f.has("primary") && f.get("primary").getAsBoolean()) { file = f; break; }
+            }
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", stringOr(v, "id", ""));
+            row.put("name", stringOr(v, "name", stringOr(v, "version_number", "")));
+            row.put("fileName", stringOr(file, "filename", ""));
+            row.put("downloadUrl", stringOr(file, "url", ""));
+            row.put("date", stringOr(v, "date_published", ""));
+            row.put("downloads", v.has("downloads") ? v.get("downloads").getAsLong() : 0L);
+            row.put("releaseType", releaseTypeRank(stringOr(v, "version_type", "release")));
+            row.put("gameVersions", collectStrings(v.getAsJsonArray("game_versions")));
+            row.put("loaders", collectStrings(v.getAsJsonArray("loaders")));
+            out.add(row);
+        }
+        return out;
+    }
+
+    /* Modrinth называет тип словами, CurseForge — числами (1 release, 2 beta,
+       3 alpha). Приводим к одному виду, чтобы фронтенд красил одинаково. */
+    private static int releaseTypeRank(String type) {
+        return switch (type == null ? "" : type.toLowerCase()) {
+            case "beta" -> 2;
+            case "alpha" -> 3;
+            default -> 1;
+        };
     }
 
     private static Map<String, Object> loaderRow(String familyKey, String mcVersion, String build, String channel, boolean recommended) {

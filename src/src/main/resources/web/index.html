@@ -23,7 +23,7 @@
       document.documentElement.dataset.perf = tier;
     })();
   </script>
-  <link rel="stylesheet" href="css/style.css?v=20260706-0004">
+  <link rel="stylesheet" href="css/style.css?v=20260912-0019">
 </head>
 <body>
   <video class="bg" id="bgPlay" autoplay muted loop playsinline></video>
@@ -45,10 +45,10 @@
   <header class="titlebar">
     <span class="title"><b>vulkan</b> launcher</span>
     <div class="title-actions">
-      <button class="title-btn folder" title="Open folder" onclick="openCurrentFolder()">DIR</button>
-      <button class="title-btn" title="Minimize" onclick="pulse.minimize()">-</button>
-      <button class="title-btn" title="Maximize" onclick="pulse.maximize()">[]</button>
-      <button class="title-btn close" title="Close" onclick="closeLauncher()">X</button>
+      <button class="title-btn folder" title="Open folder" onclick="openCurrentFolder()" data-i18n-attr="title:title.folder">DIR</button>
+      <button class="title-btn" title="Minimize" onclick="pulse.minimize()" data-i18n-attr="title:title.minimize">-</button>
+      <button class="title-btn" title="Maximize" onclick="pulse.maximize()" data-i18n-attr="title:title.maximize">[]</button>
+      <button class="title-btn close" title="Close" onclick="closeLauncher()" data-i18n-attr="title:title.close">X</button>
     </div>
   </header>
 
@@ -65,23 +65,23 @@
       </div>
 
       <nav class="nav">
-        <button class="nav-btn active" onclick="switchTab('play', this)">Play</button>
-        <button class="nav-btn" onclick="switchTab('mods', this)">Mods</button>
-        <button class="nav-btn" onclick="switchTab('settings', this)">Settings</button>
+        <button class="nav-btn active" onclick="switchTab('play', this)" data-i18n="nav.play">Play</button>
+        <button class="nav-btn" onclick="switchTab('mods', this)" data-i18n="nav.mods">Mods</button>
+        <button class="nav-btn" onclick="switchTab('settings', this)" data-i18n="nav.settings">Settings</button>
       </nav>
 
       <section class="pulse-lock-card reveal" id="pulseLockCard">
-        <div class="section-label">Профиль</div>
+        <div class="section-label" data-i18n="sidebar.profile">Профиль</div>
         <div class="pulse-lock-main">Fabric 1.21.4</div>
-        <div class="pulse-lock-sub">Фиксированная сборка</div>
+        <div class="pulse-lock-sub" data-i18n="sidebar.vanilla.fixed">Фиксированная сборка</div>
       </section>
 
       <section class="versions-card vanilla-only" id="versionsCard">
-        <div class="section-label">Versions</div>
+        <div class="section-label" data-i18n="sidebar.versions">Versions</div>
         <div class="versions-list" id="versionList"></div>
       </section>
 
-      <button class="account-bar" id="accountBar" onclick="openAccounts()" title="Управление аккаунтами">
+      <button class="account-bar" id="accountBar" onclick="openAccounts()" title="Управление аккаунтами" data-i18n-attr="title:sidebar.accounts">
         <div class="avatar" id="avatar">P</div>
         <div class="account-bar-text">
           <div class="account-name" id="accountName">Player</div>
@@ -89,6 +89,10 @@
         </div>
         <span class="account-bar-chevron">›</span>
       </button>
+
+      <!-- Полоска жизни внизу сайдбара: луг в режиме Vanilla, небула в режиме
+           чита. Анимация идёт непрерывно и от курсора не зависит. -->
+      <div class="sidebar-fx" id="sidebarFx" title=""></div>
     </aside>
 
     <section class="content">
@@ -114,22 +118,22 @@
           </div>
 
           <div class="loader-panel vanilla-only">
-            <button class="loader-toggle" id="loaderToggle" onclick="toggleLoaderDrawer()">Available loaders</button>
+            <button class="loader-toggle" id="loaderToggle" onclick="toggleLoaderDrawer()" data-i18n="hero.loaders">Available loaders</button>
             <div class="loader-drawer" id="loaderDrawer"></div>
           </div>
 
-          <div class="version-summary vanilla-only">
+          <div class="version-summary vanilla-only" id="versionSummary">
             <div class="summary-card">
               <strong id="selectedVersionLabel">1.21.4</strong>
-              <span>selected version</span>
+              <span data-i18n="hero.selectedVersion">selected version</span>
             </div>
             <div class="summary-card">
               <strong id="selectedLoaderVersionLabel">Fabric 1.21.4</strong>
-              <span>selected loader build</span>
+              <span data-i18n="hero.selectedLoader">selected loader build</span>
             </div>
             <div class="summary-card">
               <strong id="selectedModeLabel">vulkan</strong>
-              <span>active profile</span>
+              <span data-i18n="hero.activeProfile">active profile</span>
             </div>
           </div>
 
@@ -138,11 +142,11 @@
             <div class="progress-text" id="launchStatus">Ready</div>
           </div>
 
-          <button class="text-link" id="logToggle" onclick="toggleLog()">Show log</button>
+          <button class="text-link" id="logToggle" onclick="toggleLog()" data-i18n="hero.showLog">Show log</button>
           <pre class="logbox" id="logbox"></pre>
         </div>
 
-        <div class="music-card reveal">
+        <div class="music-card reveal" id="musicCard">
           <div class="music-top">
             <div>
               <div class="music-title">Background music</div>
@@ -155,10 +159,10 @@
             </div>
           </div>
           <div class="music-controls">
-            <button class="mini-btn" id="musicPlayBtn" onclick="toggleMusicPlayback()">Pause</button>
-            <button class="mini-btn" onclick="nextTrack()">Next</button>
+            <button class="mini-btn" id="musicPlayBtn" onclick="toggleMusicPlayback()" data-i18n="music.pause">Pause</button>
+            <button class="mini-btn" onclick="nextTrack()" data-i18n="music.next">Next</button>
             <label class="music-volume">
-              <span>Volume</span>
+              <span data-i18n="music.volume">Volume</span>
               <input type="range" min="0" max="100" value="70" id="musicVolumeSlider" oninput="onMusicVolume(this.value)">
               <b id="musicVolumeValue">70%</b>
             </label>
@@ -196,7 +200,7 @@
             </div>
 
             <!-- Settings button -->
-            <button class="mini-btn" onclick="openBytebeatSettings()" style="margin-top:12px;">⚙️ Bytebeat Settings</button>
+            <button class="mini-btn" id="bytebeatBtn" onclick="openBytebeatSettings()" style="margin-top:12px;" data-i18n="music.settings">⚙️ Bytebeat Settings</button>
           </div>
 
           <!-- Playlist tab -->
@@ -205,7 +209,7 @@
               <div class="spotify-row">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="#1DB954"><path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/></svg>
                 <span class="spotify-label">Spotify</span>
-                <button class="mini-btn spotify-open-btn" onclick="openSpotifyModal()">Настроить</button>
+                <button class="mini-btn spotify-open-btn" id="spotifyBtn" onclick="openSpotifyModal()" data-i18n="music.setup">Настроить</button>
               </div>
             </div>
           </div>
@@ -221,12 +225,12 @@
           </div>
           <div class="modal-body">
             <div class="setting-row">
-              <label>Mode</label>
+              <label data-i18n="bb.mode">Mode</label>
               <select id="bytebeatModeSelect" onchange="updateBytebeatMode()">
                 <option value="floatbeat" selected>Floatbeat</option>
                 <option value="bytebeat">Bytebeat (8-bit)</option>
                 <option value="signed">Signed Bytebeat</option>
-                <option value="funcbeat">Funcbeat</option>
+                <option value="funcbeat" data-i18n="bb.mode.func">Funcbeat</option>
               </select>
             </div>
             <div class="setting-row">
@@ -267,11 +271,22 @@
         </div>
 
         <div class="mods-toolbar reveal">
-          <input id="modsSearch" placeholder="Search mods in Modrinth catalog" oninput="debouncedBrowserSearch(this.value)">
+          <div class="source-switch" id="modSourceSwitch">
+            <button class="mode-btn active" data-source="modrinth" onclick="setModSource('modrinth')">Modrinth</button>
+            <button class="mode-btn" data-source="curseforge" onclick="setModSource('curseforge')">CurseForge</button>
+          </div>
+          <input id="modsSearch" placeholder="Search mods in catalog" data-i18n-attr="placeholder:mods.search" oninput="debouncedBrowserSearch(this.value)">
+        </div>
+
+        <!-- Группы модов. Список приходит с бэкенда: он общий для Modrinth и
+             CurseForge, поэтому чипы не меняются при переключении источника. -->
+        <div class="mods-categories reveal" id="modCategories" title="У CurseForge поиск принимает только одну группу за запрос — уйдёт первая выбранная" data-i18n-attr="title:mods.sourceHint"></div>
+
+        <div class="mods-toolbar-more">
           <button class="ghost-btn" onclick="autoInstallRequiredMods()">Auto-install required mods</button>
-          <button class="ghost-btn" onclick="installPerformancePack()" title="Sodium, Lithium, FerriteCore и другие — кратный рост FPS">Ускорить игру</button>
+          <button class="ghost-btn" id="modsSpeedUpBtn" onclick="installPerformancePack()" title="Sodium, Lithium, FerriteCore и другие — кратный рост FPS" data-i18n="mods.speedUp" data-i18n-attr="title:mods.speedUpHint">Ускорить игру</button>
           <button class="ghost-btn vanilla-only" onclick="runAutoDisable()">Auto-disable incompatible</button>
-          <button class="ghost-btn vanilla-only" onclick="checkModUpdates()">Auto-update status</button>
+          <button class="ghost-btn vanilla-only" id="modsUpdateBtn" onclick="checkModUpdates()" data-i18n="mods.checkUpdates">Auto-update status</button>
         </div>
 
         <div class="mods-layout">
@@ -279,6 +294,7 @@
             <div class="mods-section reveal">
               <div class="mods-section-title">Catalog browser</div>
               <div class="browser-results" id="browserModsList"></div>
+              <button class="ghost-btn load-more" id="loadMoreMods" onclick="loadMoreMods()" hidden>Показать ещё</button>
             </div>
 
             <div class="mods-section reveal vanilla-only">
@@ -297,26 +313,13 @@
             </div>
           </div>
 
-          <aside class="mod-detail t-panel-slide" id="modDetail" data-open="false">
-            <div class="detail-icon" id="detailIcon">M</div>
-            <div class="t-stagger" id="detailStagger">
-              <h3 class="t-stagger-line t-stagger-line--1" id="detailName">Select a mod</h3>
-              <div class="detail-meta t-stagger-line t-stagger-line--2" id="detailMeta">Version compatibility and update status will appear here.</div>
-              <p class="detail-desc t-stagger-line t-stagger-line--3" id="detailDesc">Choose any mod from the list to inspect compatibility, state and local actions.</p>
-            </div>
-            <div class="detail-actions">
-              <button class="ghost-btn" id="toggleSelectedModBtn" onclick="toggleSelectedMod()">Toggle</button>
-              <button class="ghost-btn" onclick="restoreModsSnapshot()">Restore snapshot</button>
-            </div>
-            <div class="detail-flags" id="detailFlags"></div>
-          </aside>
         </div>
       </section>
 
       <section class="page" id="page-settings">
         <div class="settings-grid">
           <div class="settings-card reveal">
-            <h3>Launch</h3>
+            <h3 data-i18n="settings.launch">Launch</h3>
             <label class="setting-row">
               <span>RAM allocation</span>
               <input type="range" id="ramSlider" min="512" max="16384" step="256" value="2048" oninput="updateRam(this.value)">
@@ -329,7 +332,7 @@
           </div>
 
           <div class="settings-card reveal vanilla-only">
-            <h3>Profiles</h3>
+            <h3 data-i18n="settings.profiles">Profiles</h3>
             <label class="setting-row">
               <span>Vanilla default version</span>
               <select id="vanillaVersionSelect" class="select-input" onchange="syncVanillaVersion(this.value)"></select>
@@ -354,7 +357,33 @@
           </div>
 
           <div class="settings-card reveal">
-            <h3>Music</h3>
+            <h3>Мод-каталоги</h3>
+            <label class="setting-row">
+              <span>Ключ CurseForge</span>
+              <input type="text" id="curseforgeKey" class="text-input" placeholder="необязательно" data-i18n-attr="placeholder:mods.optional" onchange="saveSettings()">
+            </label>
+            <div class="setting-note">
+              Без ключа CurseForge работает через публичный прокси api.curse.tools.
+              Свой ключ (console.curseforge.com) переключает лаунчер на официальный API.
+            </div>
+          </div>
+
+          <div class="settings-card reveal">
+            <h3 data-i18n="settings.language">Язык</h3>
+            <label class="setting-row">
+              <span data-i18n="settings.language">Язык</span>
+              <select id="langSelect" class="select-input"></select>
+            </label>
+            <div class="setting-note" data-i18n="settings.languageNote">Язык интерфейса и туториала.</div>
+            <label class="setting-row">
+              <span data-i18n="settings.tutorial">Обучение</span>
+              <button class="ghost-btn" onclick="startTutorial()" data-i18n="settings.tutorialRun">Пройти обучение заново</button>
+            </label>
+            <div class="setting-note" data-i18n="settings.tutorialNote">Короткий разбор того, что где находится.</div>
+          </div>
+
+          <div class="settings-card reveal">
+            <h3 data-i18n="settings.music">Music</h3>
             <label class="toggle-row">
               <span>Enable background music</span>
               <input type="checkbox" id="musicEnabled" onchange="saveSettings()">
@@ -377,11 +406,44 @@
   <!-- Управление аккаунтами. Панель выезжает справа по паттерну panel reveal
        из design/panel reveal.txt, а заголовок с подписью проявляются каскадом
        по паттерну text reveal из design/text reveal.txt. -->
+  <!-- Описание мода выезжает справа поверх списка.
+       Раньше оно лежало второй колонкой .mods-layout, но окно лаунчера 1100 px
+       попадает в медиазапрос max-width:1120px: раскладка схлопывается в одну
+       колонку, и панель оказывалась ПОД всем списком — замерено, её верх на
+       4103 px при высоте окна 607. Клик по моду менял описание, которого не
+       видно. Теперь панель живёт отдельным слоем у правого края. -->
+  <div class="detail-scrim" id="detailScrim" onclick="closeModDetail()"></div>
+  <aside class="mod-detail t-panel-slide t-panel-slide--x" id="modDetail" data-open="false">
+    <div class="mod-detail-head">
+      <div class="detail-icon" id="detailIcon">M</div>
+      <button class="title-btn detail-close" onclick="closeModDetail()" title="Закрыть" data-i18n-attr="title:common.close">✕</button>
+    </div>
+    <div class="t-stagger" id="detailStagger">
+      <h3 class="t-stagger-line t-stagger-line--1" id="detailName" data-t-chars>Select a mod</h3>
+      <div class="detail-meta t-stagger-line t-stagger-line--2" id="detailMeta" data-t-chars>Version compatibility and update status will appear here.</div>
+    </div>
+
+    <div class="detail-actions">
+      <button class="ghost-btn" id="toggleSelectedModBtn" onclick="toggleSelectedMod()">Toggle</button>
+      <button class="ghost-btn" id="detailVersionsBtn" onclick="toggleDetailVersions()" hidden>Версии</button>
+      <button class="ghost-btn" onclick="restoreModsSnapshot()">Restore snapshot</button>
+    </div>
+
+    <!-- Список версий скрыт, пока его не попросят кнопкой: иначе панель
+         превращается в свалку ещё до того, как человек прочитал описание. -->
+    <div class="detail-versions" id="detailVersions" data-open="false"></div>
+
+    <!-- Описание — богатый текст с картинками, поэтому обычный div, а не <p>:
+         внутри бывают абзацы, списки и изображения. -->
+    <div class="detail-desc" id="detailDesc"></div>
+    <div class="detail-flags" id="detailFlags"></div>
+  </aside>
+
   <div class="account-scrim" id="accountScrim" onclick="closeAccounts()"></div>
   <aside class="account-panel t-panel-slide t-panel-slide--x" id="accountPanel" data-open="false">
     <div class="account-panel-head">
       <div class="t-stagger" id="accountStagger">
-        <h3 class="t-stagger-line t-stagger-line--1">Аккаунты</h3>
+        <h3 class="t-stagger-line t-stagger-line--1" data-i18n="acc.title">Аккаунты</h3>
         <p class="t-stagger-line t-stagger-line--2">Выбери, под кем играть</p>
       </div>
       <button class="account-close" onclick="closeAccounts()" title="Закрыть">✕</button>
@@ -472,7 +534,14 @@
     </div>
   </div>
 
-  <script src="js/app.js?v=20260706-0004"></script>
-  <script src="js/effects.js?v=20260706-0004"></script>
+  <script src="js/i18n.js?v=20260912-0019"></script>
+  <script src="js/app.js?v=20260912-0019"></script>
+  <script src="js/scene.js?v=20260912-0019"></script>
+  <script src="js/smooth-scroll.js?v=20260912-0019"></script>
+  <script src="js/scramble.js?v=20260912-0019"></script>
+  <script src="js/richtext.js?v=20260912-0019"></script>
+  <script src="js/text-reveal.js?v=20260912-0019"></script>
+  <script src="js/effects.js?v=20260912-0019"></script>
+  <script src="js/tutorial.js?v=20260912-0019"></script>
 </body>
 </html>

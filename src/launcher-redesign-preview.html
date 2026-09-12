@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>pulsePLUS Launcher 1.21.5 Preview</title>
+  <style>
+    :root {
+      --green-1: #4db266;
+      --green-2: #2f8f48;
+      --green-3: #a8f1b7;
+      --ink: #09110b;
+      --panel: rgba(12, 20, 14, 0.82);
+      --panel-2: rgba(21, 31, 24, 0.92);
+      --line: rgba(130, 231, 153, 0.22);
+      --text: #ebfff0;
+      --muted: #9fbbab;
+      --warn: #f0b14a;
+      --bad: #ef6a6a;
+      --shadow: 0 24px 60px rgba(0, 0, 0, 0.38);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(89, 186, 111, 0.22), transparent 34%),
+        radial-gradient(circle at bottom right, rgba(46, 126, 66, 0.20), transparent 30%),
+        linear-gradient(180deg, #081008 0%, #101813 100%);
+      overflow: hidden;
+    }
+
+    .shell {
+      width: min(1240px, calc(100vw - 48px));
+      height: min(860px, calc(100vh - 48px));
+      margin: 24px auto;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      background: linear-gradient(180deg, rgba(16, 27, 18, 0.94), rgba(8, 13, 10, 0.98));
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .sidebar {
+      padding: 22px;
+      border-right: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(17, 28, 20, 0.96), rgba(10, 16, 12, 0.96));
+    }
+
+    .brand {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+      margin-bottom: 22px;
+      animation: rise .6s ease both;
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1;
+    }
+
+    .brand small {
+      display: block;
+      color: var(--muted);
+      margin-top: 6px;
+      font-size: 12px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .vanilla-btn {
+      border: 1px solid rgba(168, 241, 183, 0.28);
+      background: linear-gradient(180deg, rgba(80, 153, 97, 0.22), rgba(37, 80, 46, 0.18));
+      color: var(--green-3);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: transform .2s ease, border-color .2s ease, background .2s ease;
+    }
+
+    .vanilla-btn:hover {
+      transform: translateY(-1px);
+      border-color: rgba(168, 241, 183, 0.5);
+      background: linear-gradient(180deg, rgba(93, 178, 113, 0.30), rgba(37, 80, 46, 0.24));
+    }
+
+    .nav, .version-list, .stats {
+      display: grid;
+      gap: 10px;
+    }
+
+    .nav button, .version-chip, .stat, .mod-card, .switch-row, .download-card {
+      animation: rise .6s ease both;
+    }
+
+    .nav button {
+      text-align: left;
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all .2s ease;
+    }
+
+    .nav button.active,
+    .nav button:hover {
+      color: var(--text);
+      border-color: var(--line);
+      background: rgba(104, 189, 122, 0.09);
+    }
+
+    .block-title {
+      margin: 22px 0 10px;
+      color: var(--green-3);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .version-list {
+      max-height: 360px;
+      overflow: auto;
+      padding-right: 6px;
+    }
+
+    .version-chip {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px 12px;
+      background: rgba(18, 27, 20, 0.82);
+      color: var(--text);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+    }
+
+    .version-chip.active { border-color: rgba(168, 241, 183, 0.48); }
+
+    .content {
+      padding: 22px;
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      gap: 18px;
+    }
+
+    .hero, .downloads, .mods-grid {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px;
+      backdrop-filter: blur(12px);
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.1fr .9fr;
+      gap: 18px;
+      min-height: 240px;
+    }
+
+    .hero h2 {
+      margin: 0;
+      font-size: 34px;
+      line-height: 1.05;
+    }
+
+    .hero p {
+      color: var(--muted);
+      max-width: 560px;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 20px;
+    }
+
+    .cta {
+      border: 0;
+      border-radius: 14px;
+      padding: 14px 18px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform .2s ease, filter .2s ease;
+    }
+
+    .cta.primary {
+      color: #fff;
+      background: linear-gradient(180deg, var(--green-1), var(--green-2));
+      box-shadow: 0 14px 28px rgba(47, 143, 72, 0.28);
+    }
+
+    .cta.secondary {
+      color: var(--text);
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--line);
+    }
+
+    .cta:hover { transform: translateY(-1px); filter: brightness(1.04); }
+
+    .hero-side {
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .stat {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: rgba(255,255,255,0.03);
+    }
+
+    .stat strong { display: block; font-size: 22px; }
+    .stat span { color: var(--muted); font-size: 13px; }
+
+    .downloads {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 14px;
+    }
+
+    .download-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      background: var(--panel-2);
+    }
+
+    .download-card h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+
+    .download-card p {
+      margin: 0 0 14px;
+      color: var(--muted);
+      font-size: 13px;
+      min-height: 36px;
+    }
+
+    .mods-grid {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      min-height: 0;
+    }
+
+    .mod-list {
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .mod-card {
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 16px;
+      background: rgba(255,255,255,0.03);
+      display: grid;
+      gap: 10px;
+    }
+
+    .mod-card header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .badge {
+      border-radius: 999px;
+      padding: 5px 10px;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .badge.ok { background: rgba(77, 178, 102, 0.16); color: var(--green-3); }
+    .badge.warn { background: rgba(240, 177, 74, 0.16); color: var(--warn); }
+    .badge.bad { background: rgba(239, 106, 106, 0.16); color: var(--bad); }
+
+    .switches {
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .switch-row {
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 14px;
+      background: rgba(255,255,255,0.03);
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .toggle {
+      width: 48px;
+      height: 28px;
+      border-radius: 999px;
+      background: linear-gradient(180deg, #58ba71, #2f8f48);
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .toggle::after {
+      content: "";
+      position: absolute;
+      top: 3px;
+      left: 23px;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: 0 3px 8px rgba(0,0,0,.24);
+    }
+
+    @keyframes rise {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1080px) {
+      .shell { grid-template-columns: 1fr; height: auto; overflow: auto; }
+      .hero, .downloads, .mods-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div>
+          <h1>pulsePLUS</h1>
+          <small>Minecraft 1.21.5 Launcher</small>
+        </div>
+        <button class="vanilla-btn">Vanilla</button>
+      </div>
+
+      <div class="nav">
+        <button class="active">Играть</button>
+        <button>Моды</button>
+        <button>Загрузки</button>
+        <button>Настройки</button>
+        <button>Логи</button>
+      </div>
+
+      <div class="block-title">Версии</div>
+      <div class="version-list">
+        <div class="version-chip">1.8 <span>Legacy</span></div>
+        <div class="version-chip">1.8.9 <span>PvP</span></div>
+        <div class="version-chip">1.12.2 <span>Forge</span></div>
+        <div class="version-chip">1.16.5 <span>Stable</span></div>
+        <div class="version-chip">1.18.2 <span>Fabric</span></div>
+        <div class="version-chip">1.19.4 <span>Fabric</span></div>
+        <div class="version-chip">1.20.1 <span>Popular</span></div>
+        <div class="version-chip">1.20.4 <span>LTS</span></div>
+        <div class="version-chip">1.21 <span>Release</span></div>
+        <div class="version-chip">1.21.1 <span>Recommended</span></div>
+        <div class="version-chip">1.21.4 <span>pulsePLUS</span></div>
+        <div class="version-chip active">1.21.5 <span>Newest</span></div>
+      </div>
+    </aside>
+
+    <main class="content">
+      <section class="hero">
+        <div>
+          <h2>Современный launcher с изолированным Vanilla и управляемыми модами</h2>
+          <p>Отдельная папка для чистого Minecraft, плавные анимации, каталог версий от 1.8 до 1.21.5, контроль совместимости модов и журнал обновлений без лишнего шума.</p>
+          <div class="hero-actions">
+            <button class="cta primary">Запустить pulsePLUS</button>
+            <button class="cta secondary">Запустить Vanilla</button>
+          </div>
+        </div>
+        <div class="hero-side">
+          <div class="stat"><strong>1.21.5</strong><span>текущая выбранная версия</span></div>
+          <div class="stat"><strong>27</strong><span>доступных версий в каталоге</span></div>
+          <div class="stat"><strong>5 / 8</strong><span>активных совместимых модов</span></div>
+        </div>
+      </section>
+
+      <section class="downloads">
+        <div class="download-card">
+          <h3>Каталог версий</h3>
+          <p>Старые и новые сборки, отсортированные по возрастанию: от 1.8 до 1.21.5.</p>
+          <button class="cta secondary">Открыть список</button>
+        </div>
+        <div class="download-card">
+          <h3>Vanilla папка</h3>
+          <p>Чистый клиент хранится отдельно в `%appdata%/pulsePLUS/vanilla` без пересечения с модами.</p>
+          <button class="cta secondary">Открыть директорию</button>
+        </div>
+        <div class="download-card">
+          <h3>Авто-обновление</h3>
+          <p>Некритичные отставания пишутся в лог, важные обновления выводятся отдельным действием.</p>
+          <button class="cta secondary">Посмотреть отчёт</button>
+        </div>
+      </section>
+
+      <section class="mods-grid">
+        <div class="mod-list">
+          <div class="mod-card">
+            <header>
+              <div>
+                <strong>Sodium</strong>
+                <div style="color:var(--muted);font-size:13px;">0.6.0 для 1.21.5</div>
+              </div>
+              <span class="badge ok">Совместим</span>
+            </header>
+            <div style="color:var(--muted);font-size:13px;">Уже загружен. Хранится в отдельном разделе скачанных модов.</div>
+          </div>
+
+          <div class="mod-card">
+            <header>
+              <div>
+                <strong>JEI</strong>
+                <div style="color:var(--muted);font-size:13px;">17.x обнаружен, версия профиля 1.20.4</div>
+              </div>
+              <span class="badge warn">Нужна проверка</span>
+            </header>
+            <div style="color:var(--muted);font-size:13px;">Launcher покажет, что мод не подтверждён для 1.21.5, и предложит отключить автоматически.</div>
+          </div>
+
+          <div class="mod-card">
+            <header>
+              <div>
+                <strong>LegacyCombat</strong>
+                <div style="color:var(--muted);font-size:13px;">Старый мод для 1.8.9</div>
+              </div>
+              <span class="badge bad">Несовместим</span>
+            </header>
+            <div style="color:var(--muted);font-size:13px;">Будет перемещён в `disabled-mods/1.21.5`, состояние сохранится в профиле версии.</div>
+          </div>
+        </div>
+
+        <div class="switches">
+          <div class="switch-row">
+            <div>
+              <strong>Авто-выключение несовместимых</strong>
+              <div style="color:var(--muted);font-size:13px;">Перемещает конфликтующие jar в отдельную папку и запоминает состояние.</div>
+            </div>
+            <div class="toggle"></div>
+          </div>
+          <div class="switch-row">
+            <div>
+              <strong>Авто-обновление модов</strong>
+              <div style="color:var(--muted);font-size:13px;">Проверяет критические обновления только перед запуском.</div>
+            </div>
+            <div class="toggle"></div>
+          </div>
+          <div class="switch-row">
+            <div>
+              <strong>Раздел скачанных модов</strong>
+              <div style="color:var(--muted);font-size:13px;">Повторная загрузка не нужна, используются локальные артефакты.</div>
+            </div>
+            <div class="toggle"></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

@@ -101,9 +101,14 @@ body.preview-minimized .content,body.preview-minimized .sidebar{pointer-events:n
 .caret{color:var(--accent-soft);animation:blink 1s steps(1) infinite}
 .brand-version{margin-top:7px;font-size:11px;color:#d0d5ef}
 
+/* Скругление обязательно: обе карточки получили стеклянную тень (см. блок
+   «Стекло и глубина»), а тень без радиуса рисуется квадратом. */
 .profile-card{
-  padding:12px 0 16px;border-top:1px solid rgba(255,255,255,.02);border-bottom:1px solid rgba(130,111,255,.18);
-  margin-bottom:16px
+  /* Боковые отступы появились вместе с радиусом: строка, прижатая к самой
+     кромке, вылезает за дугу угла и читается как съехавшая влево. */
+  padding:12px 12px 16px;border-top:1px solid rgba(255,255,255,.02);border-bottom:1px solid rgba(130,111,255,.18);
+  border-radius:var(--r-md);
+  margin-bottom:16px;text-align:center
 }
 .profile-name{font-size:13px;font-weight:700;color:#fff}
 .profile-meta{margin-top:4px;font-size:11px;color:var(--muted)}
@@ -122,7 +127,12 @@ body.preview-minimized .content,body.preview-minimized .sidebar{pointer-events:n
   content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:999px;background:var(--accent)
 }
 
-.versions-card{margin-top:16px;display:grid;gap:10px;flex:1;min-height:0}
+/* Как и у .profile-card — тень без радиуса рисуется квадратом */
+.versions-card{margin-top:16px;display:grid;gap:10px;flex:1;min-height:0;border-radius:var(--r-md);padding:0 4px}
+/* Заголовок по центру карточки, а сами версии остаются списком и выравниваются
+   по левому краю: центрировать строки с названием и загрузчиком нельзя,
+   их иначе не сравнить между собой. */
+.versions-card > .section-label{text-align:center}
 .pulse-lock-card{
   margin-top:16px;padding:14px 14px 12px;border-radius:16px;border:1px solid rgba(125,92,255,.18);
   background:rgba(255,255,255,.04);display:grid;gap:6px;animation:fadeSlide .45s ease both
@@ -137,6 +147,17 @@ body.vanilla-mode .version-summary.vanilla-only{display:grid}
 body.vanilla-mode .mods-section.vanilla-only{display:block}
 body.vanilla-mode .ghost-btn.vanilla-only{display:inline-flex}
 body.vanilla-mode #pulseLockCard{display:none}
+/* ── Символы, рассыпающиеся под курсором (см. js/scramble.js) ─────────────────
+   Ширину каждого символа закрепляет JS уже после замера. Без inline-block
+   подмена глифа на «.» перекраивала бы строку целиком — в заголовке 52px это
+   видно сразу. text-align центрирует подменённый глиф внутри закреплённой
+   ширины, чтобы он не прыгал вбок. */
+.scr-char{display:inline-block;text-align:center}
+/* Обёртка на слово: между inline-block символами браузер вправе перенести
+   строку, и без неё слова рвутся посередине. nowrap оставляет переносы
+   только на пробелах. */
+.scr-word,.t-word{display:inline-block;white-space:nowrap;max-width:100%}
+
 .section-label{font-size:11px;font-weight:800;letter-spacing:.12em;color:#c7b8ff;text-transform:uppercase}
 .versions-list{display:grid;gap:7px;overflow:auto;padding-right:3px}
 .versions-list::-webkit-scrollbar{width:6px}
@@ -167,14 +188,43 @@ body.vanilla-mode .avatar{background:linear-gradient(135deg,#53d86f,#2fa84a)}
    Панель выезжает справа. Тайминги, прозрачность и блюр берутся из паттерна
    panel reveal (design/panel reveal.txt) — здесь только раскладка и цвет. */
 
+/* Скругление задано в базовом правиле, а не только в :hover. Раньше оно
+   появлялось вместе с подсветкой, и блок выглядел то прямым, то круглым. */
 button.account-bar{
   width:100%;background:transparent;border:0;cursor:pointer;text-align:left;
-  color:inherit;font:inherit;transition:background .18s
+  color:inherit;font:inherit;border-radius:var(--r-md);transition:background .18s
 }
-button.account-bar:hover{background:rgba(255,255,255,.05);border-radius:12px}
+button.account-bar:hover{background:rgba(255,255,255,.05)}
 .account-bar-text{flex:1;min-width:0}
 .account-bar-chevron{color:var(--muted);font-size:20px;line-height:1;transition:transform .18s,color .18s}
 button.account-bar:hover .account-bar-chevron{transform:translateX(2px);color:#fff}
+
+/* Полоска жизни внизу сайдбара: луг в Vanilla, небула в режиме чита.
+   Намеренно БЕЗ рамки и подложки — иначе читается как случайное окошко с
+   эффектами, а не как земля под интерфейсом. Верх растворяется маской,
+   чтобы трава возникала из сайдбара, а не начиналась по линейке.
+   margin-top:auto прижимает её к низу и заодно поднимает блок аккаунта —
+   без растущего элемента (карточка версий скрыта в режиме чита) сайдбар
+   выглядел оборванным сверху. */
+.sidebar-fx{
+  margin-top:auto;
+  height:138px;
+  /* Без этого при нехватке места в сайдбаре полоска сжимается в ноль:
+     flex-shrink по умолчанию равен единице */
+  flex-shrink:0;
+  position:relative;
+  isolation:isolate;
+  overflow:hidden;
+  /* Маска была 34% — и срезала верх полоски ровно там, где оказываются
+     Стив и кроны деревьев. Оставляем только лёгкое растворение кромки. */
+  -webkit-mask-image:linear-gradient(180deg, transparent 0%, #000 9%);
+  mask-image:linear-gradient(180deg, transparent 0%, #000 9%);
+}
+.sidebar-fx canvas{
+  position:absolute;inset:0;z-index:-1;
+  pointer-events:none
+}
+@media (max-width:860px){ .sidebar-fx{display:none} }
 
 /* Тот же panel reveal, но по X: для боковой панели вертикальный ход читается
    как «всплытие снизу» и путает. Все прочие свойства паттерна не тронуты. */
@@ -312,15 +362,14 @@ body.vanilla-mode .mode-btn.active{
 .page::-webkit-scrollbar-thumb{background:rgba(125,92,255,.26);border-radius:999px}
 body.vanilla-mode .page::-webkit-scrollbar-thumb{background:rgba(83,216,111,.28)}
 
-.hero-card,.music-card,.mods-section,.mod-detail,.settings-card{
+.hero-card,.music-card,.mods-section,.settings-card{
   background:rgba(13,14,22,.48);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(9px);
   transition:transform .28s ease,border-color .24s ease,background .24s ease,box-shadow .24s ease
 }
-.hero-card:hover,.music-card:hover,.mods-section:hover,.mod-detail:hover,.settings-card:hover{transform:translateY(-1px)}
+.hero-card:hover,.music-card:hover,.mods-section:hover,.settings-card:hover{transform:translateY(-1px)}
 body.vanilla-mode .hero-card,
 body.vanilla-mode .music-card,
 body.vanilla-mode .mods-section,
-body.vanilla-mode .mod-detail,
 body.vanilla-mode .settings-card{border-color:var(--green-border)}
 
 .hero-card{padding:28px 28px 22px;max-width:820px}
@@ -432,7 +481,9 @@ body.vanilla-mode .ghost-btn{
 }
 body.vanilla-mode .ghost-btn:hover{background:rgba(83,216,111,.20)}
 
-.mods-layout{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:16px;margin-top:16px;min-height:0}
+/* Панель описания вынесена в отдельный слой (см. .mod-detail), поэтому
+   колонка одна на любой ширине окна. */
+.mods-layout{margin-top:16px;min-height:0}
 .mods-column{display:grid;gap:16px;min-height:0}
 .mods-section{padding:18px}
 .mods-section-title{font-size:14px;font-weight:800;color:#fff;margin-bottom:12px}
@@ -460,7 +511,11 @@ body.vanilla-mode .browser-mod-row:hover{border-color:rgba(83,216,111,.24)}
 }
 .mod-row{
   display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:12px;align-items:center;
-  padding:13px 14px;border-radius:12px;background:var(--card);border:1px solid transparent;cursor:pointer;transition:.16s;color:#fff
+  padding:13px 14px;border-radius:12px;background:var(--card);border:1px solid transparent;cursor:pointer;transition:.16s;color:#fff;
+  /* Браузерное умолчание для button — text-align:center. У .nav-btn и кнопки
+     аккаунта его сняли, а здесь забыли: название мода и имя файла уезжали
+     в середину строки. */
+  text-align:left
 }
 .mod-row:hover{border-color:rgba(125,92,255,.22);transform:translateX(2px)}
 .mod-row.active{border-color:rgba(125,92,255,.34);background:rgba(125,92,255,.12)}
@@ -480,13 +535,150 @@ body.vanilla-mode .mod-row.active{border-color:rgba(83,216,111,.30);background:r
 .flag.bad{background:rgba(255,136,149,.12);color:var(--bad)}
 .flag.info{background:rgba(125,92,255,.12);color:#ddd1ff}
 
-.mod-detail{padding:20px;display:flex;flex-direction:column;gap:12px}
+/* Панель выезжает справа поверх списка — тот же механизм, что у панели
+   аккаунтов: t-panel-slide--x двигает её по X, data-open переключает.
+
+   Из общих списков карточек панель исключена намеренно. В них висит
+   backdrop-filter:blur(9px), а панель занимает всю высоту экрана — размывать
+   ей нечего, заливка ниже почти непрозрачная. Цена при этом огромная:
+   замерено, кадр во время открытия вырастал с 16.7 до 83.3 мс, то есть
+   с 60 до 12 кадров в секунду. Размытие по буквам в этом было не виновато —
+   без него и даже без разбора на буквы замер давал те же 33 мс. */
+.mod-detail{
+  position:fixed;top:var(--titlebar-h);right:0;bottom:0;z-index:41;
+  width:min(400px,92vw);padding:22px 22px 28px;overflow-y:auto;
+  --panel-translate-x:30px;
+  display:flex;flex-direction:column;gap:12px;
+  border:0;border-left:1px solid rgba(125,92,255,.22);border-radius:0;
+  background:linear-gradient(180deg, rgba(20,17,32,.98), rgba(10,9,16,.99));
+  box-shadow:-24px 0 60px rgba(0,0,0,.45)
+}
+body.vanilla-mode .mod-detail{
+  border-left-color:rgba(83,216,111,.24);
+  background:linear-gradient(180deg, rgba(14,26,18,.98), rgba(9,14,11,.99))
+}
+.mod-detail-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.detail-close{width:32px;height:32px;flex-shrink:0}
+/* Затемнение под панелью. Намеренно НЕ ловит клики: иначе, чтобы посмотреть
+   описание соседнего мода, надо было сначала закрыть текущее — клик по списку
+   уходил в затемнение. Клик мимо закрывает панель обработчиком на документе
+   (см. closeModDetail в app.js), а клик по моду просто меняет описание. */
+.detail-scrim{
+  position:fixed;top:var(--titlebar-h);right:0;bottom:0;left:0;z-index:40;
+  background:rgba(6,6,10,.55);
+  backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px);
+  opacity:0;pointer-events:none;transition:opacity .3s ease
+}
+.detail-scrim.open{opacity:1}
 .detail-icon{
   width:66px;height:66px;border-radius:16px;background:linear-gradient(135deg,#2a2440,#1a1628);display:flex;align-items:center;justify-content:center;font-size:26px;font-weight:900;color:#fff
 }
 .mod-detail h3{font-size:24px;font-weight:900;color:#fff}
 .detail-meta{font-size:12px;color:#d5dcfb}
-.detail-desc{font-size:13px;line-height:1.55;color:#edf1ff;flex:1;max-height:180px;overflow-y:auto;padding-right:4px;word-break:break-word}
+/* Внутренней прокрутки нет намеренно: описание раскрывается целиком и едет
+   вместе с панелью, а не живёт в коробке 180 px со своим скроллом. */
+/* overflow-wrap, а не word-break: первый рвёт слово только если оно не влезает
+   в строку целиком, второй — где попало. Именно из-за него в панели выходило
+   «Minec / raft» и «подс / истему». */
+.detail-desc{font-size:13px;line-height:1.55;color:#edf1ff;overflow-wrap:break-word}
+
+/* ── Содержимое описания ──────────────────────────────────────────────────────
+   Описание приходит с чужого сервера и собирается в DOM узлами (js/richtext.js),
+   поэтому все стили здесь — про теги, которые строит он, а не про исходную
+   разметку. Картинки раньше просто пропадали, теперь это их дом. */
+.detail-p{margin:0 0 10px}
+.detail-p:last-child{margin-bottom:0}
+.detail-h{margin:14px 0 8px;font-size:14px;font-weight:800;color:#fff}
+.detail-list{margin:0 0 10px;padding-left:18px;display:grid;gap:4px}
+.detail-quote{
+  margin:0 0 10px;padding:8px 12px;border-left:2px solid rgba(125,92,255,.40);
+  background:rgba(125,92,255,.07);border-radius:0 var(--r-sm) var(--r-sm) 0;color:#dfe4ff
+}
+.detail-link{color:#a99bff;text-decoration:none}
+.detail-link:hover{text-decoration:underline}
+body.vanilla-mode .detail-link{color:#9bf5ac}
+
+/* Картинки: во всю ширину панели, с мягким скруглением и растворяются при
+   появлении — они грузятся снаружи и без этого «выпрыгивают» из текста. */
+/* width:auto, а не 100%: в описаниях попадаются и скриншоты во всю ширину,
+   и маленькие бейджи (Modrinth, CurseForge, лицензия) — растянутый бейдж
+   выглядит поломанным. Натуральный размер с потолком в ширину панели
+   устраивает обоих. */
+.detail-img{
+  display:inline-block;vertical-align:middle;
+  width:auto;max-width:100%;height:auto;margin:6px 4px;
+  border-radius:var(--r-sm);border:1px solid rgba(255,255,255,.07);
+  background:rgba(255,255,255,.03);
+  animation:detailImgIn .35s ease both
+}
+/* Строка только из картинок — центрируем: одиночный скриншот по центру
+   читается лучше, чем прижатый влево */
+.detail-media{text-align:center}
+@keyframes detailImgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+
+/* ── Иконка мода ──────────────────────────────────────────────────────────────
+   Раньше здесь всегда стояла первая буква названия, хотя ссылка на иконку
+   приходила из каталога вместе со всем остальным. */
+.detail-icon{overflow:hidden}
+.detail-icon img{width:100%;height:100%;object-fit:cover;display:block}
+
+/* ── Выбор версии ─────────────────────────────────────────────────────────────
+   Свёрнут, пока не попросят: раскрытый список из сорока версий заслоняет
+   описание, ради которого панель и открывали. */
+/* flex-shrink:0 обязателен. Панель — flex-колонка, а у элемента с overflow
+   автоматический минимум равен нулю, поэтому рядом с длинным описанием блок
+   сжимался ровно в ноль: строки в нём есть, кнопка есть, высота 0. Замерено —
+   display:grid, высота 0 px. */
+.detail-versions{
+  display:none;gap:8px;max-height:320px;overflow-y:auto;padding-right:4px;
+  flex-shrink:0
+}
+.detail-versions[data-open="true"]{display:grid}
+.detail-versions::-webkit-scrollbar{width:6px}
+.detail-versions::-webkit-scrollbar-thumb{background:rgba(125,92,255,.35);border-radius:999px}
+
+.version-row{
+  display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;
+  padding:10px 12px;border-radius:var(--r-md);
+  background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06)
+}
+.version-row:hover{border-color:rgba(125,92,255,.26)}
+.version-name{font-size:12px;font-weight:700;color:#fff;overflow-wrap:anywhere}
+.version-meta{margin-top:3px;font-size:11px;color:var(--muted)}
+.version-dl{
+  padding:7px 12px;border-radius:var(--r-sm);cursor:pointer;white-space:nowrap;
+  background:rgba(125,92,255,.20);border:1px solid rgba(125,92,255,.34);
+  color:#fff;font-size:12px;font-weight:700;transition:.16s
+}
+.version-dl:hover:not(:disabled){background:rgba(125,92,255,.32)}
+.version-dl:disabled{opacity:.55;cursor:default}
+body.vanilla-mode .version-dl{background:rgba(83,216,111,.20);border-color:rgba(83,216,111,.34)}
+body.vanilla-mode .version-dl:hover:not(:disabled){background:rgba(83,216,111,.32)}
+
+/* ── Переключатель источника каталога ─────────────────────────────────────── */
+/* ── Группы модов ─────────────────────────────────────────────────────────── */
+.mods-categories{
+  display:flex;flex-wrap:wrap;gap:6px;margin-top:12px;
+  /* Список групп бывает длинным: переносим, но не растягиваем строку */
+  max-width:100%
+}
+.cat-chip{
+  padding:6px 12px;border-radius:var(--r-pill);cursor:pointer;font-size:12px;font-weight:700;
+  color:#c9cfe9;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.08);
+  transition:background .16s ease,color .16s ease,border-color .16s ease
+}
+.cat-chip:hover{color:#fff;background:rgba(255,255,255,.09)}
+.cat-chip.active{
+  color:#fff;background:rgba(125,92,255,.26);border-color:rgba(125,92,255,.42)
+}
+body.vanilla-mode .cat-chip.active{
+  background:rgba(83,216,111,.22);border-color:rgba(83,216,111,.40)
+}
+
+.load-more{width:100%;margin-top:12px;justify-content:center}
+
+.source-switch{display:flex;gap:6px}
+.source-switch .mode-btn{padding:9px 14px;font-size:12px}
 .detail-desc::-webkit-scrollbar{width:6px}
 .detail-desc::-webkit-scrollbar-thumb{background:rgba(124,92,255,.35);border-radius:6px}
 .detail-actions{display:flex;gap:8px;flex-wrap:wrap}
@@ -539,7 +731,7 @@ body.vanilla-mode .toggle-row input[type=checkbox]{accent-color:var(--green)}
 .bg{will-change:transform;transform:scale(1.02) translateZ(0);backface-visibility:hidden}
 .content{will-change:transform;transform:translateZ(0);backface-visibility:hidden}
 .app-shell{transform:translateZ(0)}
-.hero-card,.music-card,.mods-section,.mod-detail,.settings-card{will-change:transform}
+.hero-card,.music-card,.mods-section,.settings-card{will-change:transform}
 
 /* ── mod browser icons ── */
 .browser-mod-row{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:12px;align-items:center;padding:14px 15px;border-radius:12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.06);transition:transform .2s ease,border-color .2s ease,background .2s ease}
@@ -694,6 +886,19 @@ body.closing { animation: launcherOut .5s cubic-bezier(.4,0,.2,1) forwards; }
    между фоном кнопки и её текстом, поэтому надпись остаётся читаемой, а
    isolation:isolate не даёт холсту уехать под фон родителя. */
 .fx-host { position: relative; isolation: isolate; }
+
+/* Слой растяжения кромки (см. EdgeBulge в effects.js).
+   Лежит тем же ярусом, что и холст наведения: выше фона кнопки, ниже текста.
+   Фон наследуется у кнопки, а clip-path вырезает её силуэт — видно остаётся
+   только горб снаружи, поэтому он читается продолжением самой кнопки.
+   pointer-events обязателен: слой шире кнопки и иначе съел бы клики рядом. */
+.fx-bulge {
+  position: absolute;
+  z-index: -1;
+  display: none;
+  pointer-events: none;
+  will-change: clip-path;
+}
 #fxHover {
   position: absolute;
   inset: 0;
@@ -738,7 +943,7 @@ button:disabled {
 }
 
 /* Крупные поверхности — то же стекло, но мягче: они и так лежат на фоне */
-.hero-card, .music-card, .settings-card, .mods-section, .mod-detail,
+.hero-card, .music-card, .settings-card, .mods-section,
 .profile-card, .versions-card, .pulse-lock-card {
   backdrop-filter: blur(10px) saturate(1.22);
   -webkit-backdrop-filter: blur(10px) saturate(1.22);
@@ -773,7 +978,6 @@ html[data-perf="low"] .hero-card,
 html[data-perf="low"] .music-card,
 html[data-perf="low"] .settings-card,
 html[data-perf="low"] .mods-section,
-html[data-perf="low"] .mod-detail,
 html[data-perf="low"] .profile-card,
 html[data-perf="low"] .versions-card,
 html[data-perf="low"] .pulse-lock-card,
@@ -781,7 +985,8 @@ html[data-perf="low"] .sidebar,
 html[data-perf="low"] .content,
 html[data-perf="low"] .sp-modal-backdrop,
 html[data-perf="low"] .modal,
-html[data-perf="low"] .account-scrim {
+html[data-perf="low"] .account-scrim,
+html[data-perf="low"] .detail-scrim {
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
@@ -850,6 +1055,47 @@ html[data-perf="low"] #fxWave { mix-blend-mode: normal; opacity: .9; }
 }
 @media (prefers-reduced-motion: reduce) {
   .t-panel-slide, .t-stagger-line { transition: none !important; }
+}
+
+/* ── Появление текста волной ──────────────────────────────────────────────────
+   Эффект из design/reveal: каждая единица всплывает на 10px из размытия 6px.
+
+   Единица — буква или слово, решает js/text-reveal.js. В шапке и имени это
+   буквы: их десятки, и на них эффект читается как «печать». В описании —
+   слова, и это не компромисс, а замер: текст в 968 символов, разобранный на
+   буквы, роняет 40% кадров (92 кадра за 1.5 с против 53), а из 164 слов идёт
+   ровно как пустая страница — 91 кадр. Дело не в размытии, снять фильтр дало
+   лишь 56 -> 61 кадр; дорого само число анимированных элементов.
+
+   Шаг волны считает JS и кладёт в --t-char-step: он зависит от длины текста,
+   иначе волна по длинному абзацу растянулась бы на секунды.
+
+   Размытие снимается на слабых машинах: blur — самый дорогой фильтр.
+   Подъём и прозрачность остаются, эффект читается. */
+.t-part{
+  display:inline-block;
+  opacity:0;
+  transform:translateY(var(--t-char-rise,10px));
+  filter:blur(var(--t-char-blur,6px));
+  animation:tCharIn var(--t-char-dur,340ms) cubic-bezier(.22,1,.36,1) both;
+  animation-delay:calc(var(--i) * var(--t-char-step,12ms))
+}
+/* Пока контейнер не показан, буквы просто ждут — не тратим кадры впустую */
+.t-stagger:not(.is-shown) .t-part{animation:none}
+
+/* Строка-обёртка отключается: её собственный сдвиг и размытие складывались бы
+   с буквенными и эффект выглядел бы смазанным вдвойне. */
+.t-stagger-line.t-line-chars{opacity:1;transform:none;filter:none;transition:none}
+
+@keyframes tCharIn{
+  from{opacity:0;transform:translateY(var(--t-char-rise,10px));filter:blur(var(--t-char-blur,6px))}
+  to{opacity:1;transform:translateY(0);filter:blur(0)}
+}
+
+html[data-perf="low"] .t-part{filter:none;--t-char-blur:0px}
+
+@media (prefers-reduced-motion: reduce) {
+  .t-part{animation:none;opacity:1;transform:none;filter:none}
 }
 
 /* ── Music tab panels ────────────────────────────────────────────────────────── */
@@ -1126,3 +1372,136 @@ html[data-perf="low"] #fxWave { mix-blend-mode: normal; opacity: .9; }
   flex-direction: column;
   gap: 4px;
 }
+
+/* ── Обучение ─────────────────────────────────────────────────────────────────
+   Слой лежит поверх всего, но кликов НЕ ловит: слой и подсветка помечены
+   pointer-events: none. Это главное условие — обучение не должно запирать
+   игрока, он вправе нажать что угодно, а обучение просто подождёт.
+   Ловят клики только само окошко и свёрнутый уголок. */
+#tutLayer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+/* Подсветка: прозрачное окно над нужным элементом, а затемнение — это его
+   собственная тень в четыре тысячи пикселей. Такой приём не требует ничего
+   вырезать и точно повторяет форму элемента, включая скругления. */
+#tutSpot {
+  position: fixed;
+  pointer-events: none;
+  box-shadow: 0 0 0 4000px rgba(6, 6, 11, .62), 0 0 0 2px rgba(125, 92, 255, .55) inset;
+  transition: left .22s ease, top .22s ease, width .22s ease, height .22s ease;
+  animation: tutPulse 1.8s ease-in-out infinite;
+}
+body.vanilla-mode #tutSpot {
+  box-shadow: 0 0 0 4000px rgba(6, 6, 11, .62), 0 0 0 2px rgba(83, 216, 111, .55) inset;
+}
+@keyframes tutPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: .72; }
+}
+
+/* Окошко-сообщение */
+#tutCard {
+  position: fixed;
+  width: 340px;
+  max-width: calc(100vw - 24px);
+  padding: 16px 18px 14px;
+  pointer-events: auto;
+  border-radius: var(--r-lg);
+  border: 1px solid rgba(125, 92, 255, .30);
+  background: linear-gradient(180deg, rgba(24, 20, 38, .97), rgba(12, 11, 20, .98));
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .07);
+  animation: tutCardIn .26s cubic-bezier(.22, 1, .36, 1) both;
+}
+body.vanilla-mode #tutCard {
+  border-color: rgba(83, 216, 111, .30);
+  background: linear-gradient(180deg, rgba(15, 28, 20, .97), rgba(9, 14, 11, .98));
+}
+@keyframes tutCardIn {
+  from { opacity: 0; transform: translateY(8px) scale(.98); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+/* Хвостик сообщения */
+#tutCard::after {
+  content: "";
+  position: absolute;
+  left: 28px;
+  bottom: -7px;
+  width: 12px; height: 12px;
+  background: rgba(12, 11, 20, .98);
+  border-right: 1px solid rgba(125, 92, 255, .30);
+  border-bottom: 1px solid rgba(125, 92, 255, .30);
+  transform: rotate(45deg);
+}
+
+.tut-head { display: flex; align-items: center; gap: 10px; min-height: 18px; }
+.tut-step {
+  font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase;
+  color: #b9a8ff;
+}
+body.vanilla-mode .tut-step { color: var(--green-soft); }
+.tut-x {
+  margin-left: auto; width: 24px; height: 24px; border-radius: var(--r-xs);
+  background: transparent; border: 0; cursor: pointer; color: var(--muted);
+  font-size: 12px; line-height: 1
+}
+.tut-x:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+
+.tut-title { margin-top: 6px; font-size: 17px; font-weight: 800; color: #fff; }
+.tut-body { margin-top: 8px; font-size: 13px; line-height: 1.55; color: #e2e6ff; }
+
+.tut-actions { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tut-langs { display: flex; gap: 8px; margin-right: auto; }
+.tut-btn {
+  padding: 9px 14px; border-radius: var(--r-sm); cursor: pointer;
+  font-size: 13px; font-weight: 700; color: #dfe3ff;
+  background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .10);
+  transition: background .16s ease, color .16s ease
+}
+.tut-btn:hover { background: rgba(255, 255, 255, .11); color: #fff; }
+.tut-btn.accent {
+  color: #fff; background: rgba(125, 92, 255, .30); border-color: rgba(125, 92, 255, .46)
+}
+.tut-btn.accent:hover { background: rgba(125, 92, 255, .44); }
+body.vanilla-mode .tut-btn.accent {
+  background: rgba(83, 216, 111, .24); border-color: rgba(83, 216, 111, .44)
+}
+body.vanilla-mode .tut-btn.accent:hover { background: rgba(83, 216, 111, .36); }
+
+/* Свёрнутое состояние: обучение ждёт в уголке, ничего не перекрывая */
+#tutChip {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  display: flex; align-items: center; gap: 9px;
+  padding: 10px 15px;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: var(--r-pill);
+  border: 1px solid rgba(125, 92, 255, .32);
+  background: linear-gradient(180deg, rgba(24, 20, 38, .96), rgba(12, 11, 20, .97));
+  box-shadow: 0 14px 34px rgba(0, 0, 0, .48);
+  color: #e6e9ff; font-size: 13px; font-weight: 700;
+  animation: tutCardIn .26s cubic-bezier(.22, 1, .36, 1) both;
+  transition: border-color .2s ease, transform .2s ease
+}
+#tutChip:hover { border-color: rgba(125, 92, 255, .55); transform: translateY(-1px); }
+body.vanilla-mode #tutChip { border-color: rgba(83, 216, 111, .32); }
+body.vanilla-mode #tutChip:hover { border-color: rgba(83, 216, 111, .55); }
+
+.tut-chip-dot {
+  width: 8px; height: 8px; border-radius: 999px;
+  background: var(--accent);
+  animation: tutDot 1.6s ease-in-out infinite;
+}
+body.vanilla-mode .tut-chip-dot { background: var(--green); }
+@keyframes tutDot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: .45; transform: scale(.8); }
+}
+
+/* Смена языка: список языков в настройках */
+#langSelect { min-width: 140px; }

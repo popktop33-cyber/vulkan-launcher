@@ -51,6 +51,9 @@ const PREVIEW_CFG = {
   userName: 'Player',
   javaPath: '',
   msaClientId: '',
+  curseforgeKey: '',
+  modSource: 'modrinth',
+  language: 'ru',
   // Превью в файловом режиме: один офлайн-аккаунт, как при первом запуске
   accounts: [{ id: 'preview', type: 'offline', name: 'Player', uuid: '', initial: 'P', microsoft: false, lastLogin: 0 }],
   activeAccountId: 'preview',
@@ -414,6 +417,12 @@ function setupCursorBlur() {
 // Replay the staggered text reveal inside a container.
 function replayStagger(container) {
   if (!container) return;
+  // Разбор на буквы пересобираем ДО перезапуска: у нового текста другая длина,
+  // а значит другой шаг волны. Наблюдатель внутри TextReveal сработает уже
+  // после старта анимации, и она ушла бы с прошлыми номерами букв.
+  if (window.TextReveal) {
+    container.querySelectorAll('[data-t-chars]').forEach((el) => window.TextReveal.build(el));
+  }
   container.classList.remove('is-shown');
   // Force reflow so the class re-add restarts the transition
   void container.offsetWidth;
@@ -498,6 +507,10 @@ function applyStateToUi() {
   $('#musicEnabled').checked = cfg.musicEnabled !== false;
   $('#musicVolumeSlider').value = cfg.musicVolume ?? 70;
   $('#musicVolumeSettings').value = cfg.musicVolume ?? 70;
+  const keyInput = $('#curseforgeKey');
+  if (keyInput) keyInput.value = cfg.curseforgeKey || '';
+  syncModSourceSwitch();
+  applyLanguage(cfg.language || 'ru', false);
   applyActiveAccountToSidebar();
   updateRam($('#ramSlider').value);
   onMusicVolume(cfg.musicVolume ?? 70, false);
@@ -1108,12 +1121,12 @@ function setMode(mode, persist = true) {
   }
 
   const isVanilla = mode === 'vanilla';
-  $('#heroBadge').textContent = isVanilla ? 'Vanilla profile ready' : 'Ready to play';
-  $('#heroTitle').textContent = isVanilla ? 'Vanilla mode.' : 'Ready to play.';
+  $('#heroBadge').textContent = isVanilla ? t('hero.badge.vanilla') : t('hero.ready');
+  $('#heroTitle').textContent = isVanilla ? t('hero.title.vanilla') : t('hero.title.pulse');
   $('#heroText').textContent = isVanilla
-    ? 'Pure Minecraft profile with isolated clean files, real loader builds and separate download paths.'
-    : `${LAUNCHER_NAME} client locked to Fabric 1.21.4, with the original style preserved.`;
-  $('#launchBtnLabel').textContent = isVanilla ? 'LAUNCH VANILLA' : 'LAUNCH';
+    ? t('hero.text.vanilla')
+    : t('hero.text.pulse', { name: LAUNCHER_NAME, version: '1.21.4' });
+  $('#launchBtnLabel').textContent = isVanilla ? t('hero.launch.vanilla') : t('hero.launch.pulse');
 
   // Update window title via Electron IPC
   if (window.pulse && typeof window.pulse.setTitle === 'function') {
@@ -1132,6 +1145,8 @@ function setMode(mode, persist = true) {
   if (!isVanilla) $('#loaderDrawer').classList.remove('open');
   if (persist) saveSettings();
   refreshFxObstacles();   // в vanilla-режиме часть блоков появляется, часть исчезает
+  // Полоска в сайдбаре и фон на кнопках меняют вид вместе с режимом
+  if (window.FX && typeof window.FX.refreshMode === 'function') window.FX.refreshMode();
 }
 
 // A shortcut can open the launcher straight into a mode: --mode=vanilla becomes
@@ -1171,6 +1186,14 @@ function refreshFxObstacles() {
   if (window.FX && typeof window.FX.obstaclesChanged === 'function') window.FX.obstaclesChanged();
 }
 
+/* Координаты символов для эффекта рассыпания кэшируются, а смена вкладки
+   прячет страницу: у скрытых символов прямоугольник нулевой, и они выпадают
+   из кэша. Обратно они сами не вернутся — текст-то не менялся, — поэтому
+   после переключения просим пересчитать раскладку заново. */
+function refreshScramble() {
+  if (window.Scramble && typeof window.Scramble.refresh === 'function') window.Scramble.refresh();
+}
+
 function switchTab(tabName, button) {
   currentTab = tabName;
   $$('.page').forEach((page) => page.classList.remove('active'));
@@ -1181,8 +1204,10 @@ function switchTab(tabName, button) {
   $('#bgMods').classList.toggle('hidden', tabName !== 'mods');
   syncVideoPlayback();
   refreshFxObstacles();
+  refreshScramble();
   if (tabName === 'mods') {
     loadMods();
+    loadModCategories();
     loadBrowserMods($('#modsSearch')?.value || '');
   }
 }
@@ -1292,34 +1317,126 @@ async function loadMods() {
   renderMods();
 }
 
-async function loadBrowserMods(query) {
+const MODS_PAGE = 12;         // сколько модов приходит за один запрос
+
+/* Выбранные группы. Пусто — фильтра нет, показываем всё подряд. */
+let modCategories = new Set();
+let modsOffset = 0;
+let modsExhausted = false;    // источник отдал меньше страницы — дальше пусто
+
+function catalogUrl(query, offset) {
   const loaderKey = currentMode === 'vanilla' ? activeLoader().familyKey : 'fabric';
+  return `/api/catalog/mods?version=${encodeURIComponent(activeVersion())}`
+    + `&loader=${encodeURIComponent(loaderKey)}`
+    + `&query=${encodeURIComponent(query)}`
+    + `&limit=${MODS_PAGE}&offset=${offset}`
+    + `&source=${encodeURIComponent(cfg.modSource || 'modrinth')}`
+    + `&categories=${encodeURIComponent([...modCategories].join(','))}`;
+}
+
+function previewBrowserMods(query) {
   const versionId = activeVersion();
-  const cacheKey = `${versionId}|${loaderKey}|${query.trim().toLowerCase()}`;
+  return PREVIEW_BROWSER_MODS
+    .filter((mod) => mod.versions.includes(versionId) && mod.loaders.includes(activeLoader().family))
+    .filter((mod) => !query.trim() || `${mod.name} ${mod.author} ${mod.desc}`.toLowerCase().includes(query.trim().toLowerCase()));
+}
+
+async function loadBrowserMods(query) {
+  const cacheKey = `${cfg.modSource || 'modrinth'}|${activeVersion()}|${query.trim().toLowerCase()}|${[...modCategories].sort().join(',')}`;
+  modsOffset = 0;
+  modsExhausted = false;
+
   if (dynamicModsCache.has(cacheKey)) {
     browserMods = dynamicModsCache.get(cacheKey);
+    modsOffset = browserMods.length;
     renderBrowserMods(browserMods);
     return;
   }
   if (IS_FILE_PREVIEW) {
-    browserMods = PREVIEW_BROWSER_MODS
-      .filter((mod) => mod.versions.includes(versionId) && mod.loaders.includes(activeLoader().family))
-      .filter((mod) => !query.trim() || `${mod.name} ${mod.author} ${mod.desc}`.toLowerCase().includes(query.trim().toLowerCase()));
+    browserMods = previewBrowserMods(query);
     dynamicModsCache.set(cacheKey, browserMods);
     renderBrowserMods(browserMods);
     return;
   }
   try {
-    const data = await fetchJson(
-      `/api/catalog/mods?version=${encodeURIComponent(versionId)}&loader=${encodeURIComponent(loaderKey)}&query=${encodeURIComponent(query)}&limit=12`
-    );
+    const data = await fetchJson(catalogUrl(query, 0));
     browserMods = data.results || [];
     dynamicModsCache.set(cacheKey, browserMods);
+    modsOffset = browserMods.length;
+    modsExhausted = browserMods.length < MODS_PAGE;
   } catch {
-    browserMods = PREVIEW_BROWSER_MODS
-      .filter((mod) => mod.versions.includes(versionId) && mod.loaders.includes(activeLoader().family));
+    browserMods = previewBrowserMods(query);
   }
   renderBrowserMods(browserMods);
+  syncLoadMore();
+}
+
+/* Догрузка следующей порции. Дописываем в конец, а не перерисовываем список:
+   иначе слетела бы позиция прокрутки. */
+async function loadMoreMods() {
+  if (modsExhausted || IS_FILE_PREVIEW) return;
+  const btn = $('#loadMoreMods');
+  const query = $('#modsSearch') ? $('#modsSearch').value : '';
+  if (btn) { btn.disabled = true; btn.textContent = 'Загружаю…'; }
+  try {
+    const data = await fetchJson(catalogUrl(query, modsOffset));
+    const page = data.results || [];
+    if (!page.length) {
+      modsExhausted = true;
+    } else {
+      browserMods = browserMods.concat(page);
+      modsOffset += page.length;
+      modsExhausted = page.length < MODS_PAGE;
+      const cacheKey = `${cfg.modSource || 'modrinth'}|${activeVersion()}|${query.trim().toLowerCase()}|${[...modCategories].sort().join(',')}`;
+      dynamicModsCache.set(cacheKey, browserMods);
+      renderBrowserMods(browserMods);
+    }
+  } catch (error) {
+    toast(`Не удалось догрузить: ${error.message}`, 'err');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = 'Показать ещё'; }
+    syncLoadMore();
+  }
+}
+
+function syncLoadMore() {
+  const btn = $('#loadMoreMods');
+  if (!btn) return;
+  btn.hidden = modsExhausted || IS_FILE_PREVIEW;
+}
+
+/* ── Группы модов ─────────────────────────────────────────────────────────────
+   Список групп один на оба источника и приходит с бэкенда: у Modrinth
+   категории текстовые, у CurseForge числовые, и сводить их на лету значило бы
+   показывать разные чипы при переключении источника. */
+async function loadModCategories() {
+  const host = $('#modCategories');
+  if (!host || host.childElementCount) return;
+  let list = [];
+  try {
+    const data = await fetchJson('/api/catalog/categories');
+    list = data.categories || [];
+  } catch {
+    return;   // без групп каталог всё равно работает
+  }
+  host.textContent = '';
+  for (const cat of list) {
+    const chip = document.createElement('button');
+    chip.className = 'cat-chip';
+    chip.dataset.id = cat.id;
+    chip.textContent = cat.label;
+    chip.onclick = () => toggleModCategory(cat.id);
+    host.appendChild(chip);
+  }
+}
+
+function toggleModCategory(id) {
+  if (modCategories.has(id)) modCategories.delete(id);
+  else modCategories.add(id);
+  $$('#modCategories .cat-chip').forEach((chip) => {
+    chip.classList.toggle('active', modCategories.has(chip.dataset.id));
+  });
+  loadBrowserMods($('#modsSearch') ? $('#modsSearch').value : '');
 }
 
 function renderBrowserMods(items) {
@@ -1342,7 +1459,7 @@ function renderBrowserMods(items) {
     const row = document.createElement('div');
     row.className = `browser-mod-row${compatibleVersion && compatibleLoader ? '' : ' incompatible'}`;
     const iconHtml = mod.iconUrl
-      ? `<img class="browser-mod-icon" src="${escapeHtml(mod.iconUrl)}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+      ? `<img class="browser-mod-icon" src="${escapeHtml(mod.iconSmall || mod.iconUrl)}" alt="" loading="lazy" decoding="async" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
       : '';
     const letterHtml = `<div class="browser-mod-icon-letter" style="${mod.iconUrl ? 'display:none' : ''}">${escapeHtml(mod.name.charAt(0).toUpperCase())}</div>`;
     row.innerHTML = `
@@ -1398,6 +1515,9 @@ function renderBrowserMods(items) {
       showModDetail({
         name: mod.name,
         icon: (mod.name || '?').charAt(0).toUpperCase(),
+        iconUrl: mod.iconUrl || mod.iconSmall || '',
+        slug: mod.slug || '',
+        source: mod.source || cfg.modSource || 'modrinth',
         meta: `${mod.author || 'Unknown'} · ${compatibleVersion && compatibleLoader ? 'совместим' : 'несовместим'}${mod.downloads ? ' · ' + formatDownloads(mod.downloads) + ' ↓' : ''}`,
         desc: mod.desc && mod.desc.trim() ? mod.desc : 'Описание недоступно.',
         flags: [
@@ -1471,12 +1591,50 @@ function selectMod(mod) {
 }
 
 // Populate + reveal the mod detail panel. Used by both installed and catalog mods.
+/* Какой мод сейчас в панели. Нужен, чтобы ответы сети, пришедшие с
+   опозданием, не переписывали описание уже другого мода. */
+let currentDetail = null;
+
 function showModDetail(info) {
-  $('#detailIcon').textContent = info.icon || (info.name || '?').charAt(0).toUpperCase();
+  const panel = $('#modDetail');
+  if (!panel) return;
+
+  /* Иконка. Раньше здесь всегда стояла первая буква названия, хотя ссылка на
+     иконку приходила из каталога вместе со всем остальным. */
+  const iconHost = $('#detailIcon');
+  iconHost.textContent = '';
+  if (info.iconUrl) {
+    const img = document.createElement('img');
+    img.src = info.iconUrl;
+    img.alt = '';
+    img.referrerPolicy = 'no-referrer';
+    // Картинка не доехала — возвращаем букву: панель не должна пустовать
+    img.onerror = () => { iconHost.textContent = (info.name || '?').charAt(0).toUpperCase(); };
+    iconHost.appendChild(img);
+  } else {
+    iconHost.textContent = info.icon || (info.name || '?').charAt(0).toUpperCase();
+  }
+
   $('#detailName').textContent = info.name || '';
   $('#detailMeta').textContent = info.meta || '';
-  $('#detailDesc').textContent = info.desc || '';
-  $('#detailFlags').innerHTML = (info.flags || []).map((f) => `<span class="flag ${f.kind}">${escapeHtml(f.text)}</span>`).join('');
+  $('#detailFlags').innerHTML = (info.flags || [])
+    .map((f) => `<span class="flag ${escapeHtml(f.kind)}">${escapeHtml(f.text)}</span>`).join('');
+
+  /* Описание показываем коротким сразу, полное подтягиваем следом. Так панель
+     не пустует, пока идёт запрос, и остаётся осмысленной, если он не удался. */
+  $('#detailDesc').textContent = info.desc || 'Описание недоступно.';
+  currentDetail = {
+    slug: info.slug || '',
+    source: info.source || cfg.modSource || 'modrinth',
+    url: info.url || '',
+    seq: (currentDetail ? currentDetail.seq : 0) + 1
+  };
+
+  // Список версий при смене мода всегда сворачиваем: он относится к прошлому
+  const versions = $('#detailVersions');
+  if (versions) { versions.dataset.open = 'false'; versions.textContent = ''; }
+  const versionsBtn = $('#detailVersionsBtn');
+  if (versionsBtn) versionsBtn.hidden = !currentDetail.slug;
 
   const toggleBtn = $('#toggleSelectedModBtn');
   if (toggleBtn) {
@@ -1484,26 +1642,215 @@ function showModDetail(info) {
     else toggleBtn.style.display = 'none';
   }
 
-  let linkEl = $('#detailModrinthLink');
+  let linkEl = $('#detailModLink');
   if (info.url) {
     if (!linkEl) {
       linkEl = document.createElement('a');
-      linkEl.id = 'detailModrinthLink';
+      linkEl.id = 'detailModLink';
       linkEl.className = 'browser-link';
       linkEl.target = '_blank'; linkEl.rel = 'noreferrer';
       $('#detailFlags').insertAdjacentElement('beforebegin', linkEl);
     }
     linkEl.href = info.url;
-    linkEl.textContent = 'Открыть на Modrinth ↗';
+    linkEl.textContent = currentDetail.source === 'curseforge'
+      ? 'Открыть на CurseForge ↗' : 'Открыть на Modrinth ↗';
     linkEl.style.display = '';
   } else if (linkEl) {
     linkEl.style.display = 'none';
   }
 
-  const panel = $('#modDetail');
-  if (panel) { panel.setAttribute('data-open', 'true'); panel.classList.add('detail-open'); }
+  panel.setAttribute('data-open', 'true');
+  panel.classList.add('detail-open');
+  const scrim = $('#detailScrim');
+  if (scrim) scrim.classList.add('open');
   replayStagger($('#detailStagger'));
+  refreshFxObstacles();   // панель только что легла поверх списка
+
+  loadFullDescription(currentDetail);
 }
+
+/* Полное описание проекта: у Modrinth это markdown, у CurseForge — html.
+   Разбирает js/richtext.js — узлами DOM, потому что текст чужой. */
+async function loadFullDescription(detail) {
+  if (!detail || !detail.slug || IS_FILE_PREVIEW) return;
+  try {
+    const data = await fetchJson(`/api/catalog/project?source=${encodeURIComponent(detail.source)}`
+      + `&slug=${encodeURIComponent(detail.slug)}`);
+    // Пока ходили — могли выбрать другой мод. Тогда ответ уже не нужен.
+    if (currentDetail !== detail) return;
+    const project = data && data.project;
+    if (!project || !project.body) return;
+
+    window.RichText.renderInto($('#detailDesc'), project.body, project.format);
+
+    /* Волна появления. Блоки описания помечены data-t-words — разбор идёт по
+       словам, а не по буквам: замерено, что тысяча анимированных символов
+       роняет 40% кадров, а те же слова идут ровно как пустая страница. */
+    if (window.TextReveal) {
+      $('#detailDesc').querySelectorAll('[data-t-chars], [data-t-words]')
+        .forEach((el) => window.TextReveal.build(el));
+    }
+  } catch (error) {
+    // Не беда: короткое описание из каталога уже на экране
+    console.warn('[vulkan] полное описание не получено:', error.message);
+  }
+}
+
+/* Список версий. Свёрнут, пока его не попросят: раскрытые сорок версий
+   заслоняют описание, ради которого панель и открывали. */
+async function toggleDetailVersions() {
+  const host = $('#detailVersions');
+  if (!host) return;
+  if (host.dataset.open === 'true') { host.dataset.open = 'false'; return; }
+  if (host.childElementCount) { host.dataset.open = 'true'; return; }
+
+  host.dataset.open = 'true';
+  host.textContent = 'Загружаю список версий…';
+  const detail = currentDetail;
+  try {
+    const data = await fetchJson(`/api/catalog/versions?source=${encodeURIComponent(detail.source)}`
+      + `&slug=${encodeURIComponent(detail.slug)}`
+      + `&version=${encodeURIComponent(activeVersion())}`
+      + `&loader=${encodeURIComponent(activeLoader().familyKey)}`);
+    if (currentDetail !== detail) return;
+    renderDetailVersions(data.versions || []);
+  } catch (error) {
+    host.textContent = `Не удалось получить версии: ${error.message}`;
+  }
+}
+
+const RELEASE_LABEL = { 1: 'release', 2: 'beta', 3: 'alpha' };
+
+function renderDetailVersions(list) {
+  const host = $('#detailVersions');
+  host.textContent = '';
+  if (!list.length) {
+    host.textContent = `Для ${activeVersion()} / ${activeLoader().family} версий нет.`;
+    return;
+  }
+
+  for (const version of list) {
+    const row = document.createElement('div');
+    row.className = 'version-row';
+
+    const left = document.createElement('div');
+    const name = document.createElement('div');
+    name.className = 'version-name';
+    name.textContent = version.name || version.fileName || 'без названия';
+
+    const meta = document.createElement('div');
+    meta.className = 'version-meta';
+    meta.textContent = [
+      RELEASE_LABEL[version.releaseType] || '',
+      (version.gameVersions || []).slice(0, 4).join(', '),
+      version.date ? version.date.slice(0, 10) : '',
+      version.downloads ? `${formatDownloads(version.downloads)} ↓` : ''
+    ].filter(Boolean).join(' · ');
+    left.append(name, meta);
+
+    const btn = document.createElement('button');
+    btn.className = 'version-dl';
+    btn.textContent = 'Скачать';
+    btn.disabled = !version.downloadUrl;
+    if (!version.downloadUrl) btn.title = 'Прямой ссылки нет — автор запретил скачивание через API';
+    btn.onclick = () => installModVersion(version, btn);
+
+    row.append(left, btn);
+    host.appendChild(row);
+  }
+}
+
+/* Установка конкретной версии. Ссылка и имя файла уже пришли из списка, а он
+   одинаков для обоих источников, поэтому дорога на бэкенде одна. */
+async function installModVersion(version, btn) {
+  if (!version.downloadUrl) {
+    toast('Прямой ссылки нет — эту версию придётся скачать вручную', 'err');
+    return;
+  }
+  if (IS_FILE_PREVIEW) { toast(`Preview: скачал бы ${version.fileName}`, 'ok'); return; }
+
+  const was = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Качаю…';
+  try {
+    const result = await fetchJson('/api/mods/install', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        downloadUrl: version.downloadUrl,
+        fileName: version.fileName,
+        mcVersion: activeVersion(),
+        loader: activeLoader().familyKey,
+        mode: currentMode
+      })
+    });
+    if (result && result.ok === false) throw new Error(result.error || 'Install failed');
+    btn.textContent = 'Готово';
+    toast(`${version.fileName || 'Мод'} установлен`, 'ok');
+    await loadMods();
+  } catch (error) {
+    btn.disabled = false;
+    btn.textContent = was;
+    toast(`Не удалось скачать: ${error.message}`, 'err');
+  }
+}
+
+/* Панель описания теперь отдельный слой справа, а не вторая колонка списка.
+   Раньше при окне 1100 px медиазапрос max-width:1120px схлопывал раскладку
+   в одну колонку, и панель уезжала под весь список — замерено, её верх
+   оказывался на 4103 px при высоте окна 607, то есть клик по моду менял
+   описание, которого не видно. */
+function closeModDetail() {
+  const panel = $('#modDetail');
+  if (!panel) return;
+  panel.dataset.open = 'false';
+  panel.classList.remove('detail-open');
+  const scrim = $('#detailScrim');
+  if (scrim) scrim.classList.remove('open');
+  currentDetail = null;
+  refreshFxObstacles();
+}
+
+/* Клик мимо панели закрывает её. Затемнение клики не ловит (см. .detail-scrim),
+   иначе посмотреть описание соседнего мода можно было бы только через два
+   нажатия: первое уходило в затемнение и закрывало панель, второе открывало
+   новую. Поэтому клик по строке мода пропускаем — он сам сменит описание. */
+document.addEventListener('click', (e) => {
+  const panel = $('#modDetail');
+  if (!panel || panel.dataset.open !== 'true') return;
+  if (e.target.closest('#modDetail')) return;
+  if (e.target.closest('.mod-row, .browser-mod-row')) return;
+  closeModDetail();
+});
+
+/* ── Источник каталога ────────────────────────────────────────────────────────
+   Modrinth и CurseForge отдают одинаковую форму, поэтому переключение —
+   это одна переменная и повторный поиск. */
+function setModSource(source) {
+  cfg.modSource = source === 'curseforge' ? 'curseforge' : 'modrinth';
+  syncModSourceSwitch();
+  saveSettings();
+  loadBrowserMods($('#modsSearch') ? $('#modsSearch').value : '');
+}
+
+function syncModSourceSwitch() {
+  const host = $('#modSourceSwitch');
+  if (!host) return;
+  $$('#modSourceSwitch .mode-btn').forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.source === (cfg.modSource || 'modrinth'));
+  });
+}
+
+/* Esc закрывает правые панели: из описания мода иначе можно было выйти только
+   крестиком или кликом мимо. Проверяем, что панель вообще открыта — иначе Esc
+   дёргал бы cancelMsaLogin на каждом нажатии. */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape') return;
+  const detail = $('#modDetail');
+  if (detail && detail.dataset.open === 'true') { closeModDetail(); return; }
+  const accounts = $('#accountPanel');
+  if (accounts && accounts.dataset.open === 'true') closeAccounts();
+});
 
 async function toggleSelectedMod() {
   if (!selectedMod) return;
@@ -1689,6 +2036,10 @@ async function saveSettings(showToast = false) {
   cfg.musicEnabled = $('#musicEnabled').checked;
   cfg.musicVolume = Number($('#musicVolumeSlider').value);
   cfg.lastMode = currentMode;
+  const keyInput = $('#curseforgeKey');
+  if (keyInput) cfg.curseforgeKey = keyInput.value.trim();
+  const langSelect = $('#langSelect');
+  if (langSelect && langSelect.value) cfg.language = langSelect.value;
 
   if (IS_FILE_PREVIEW) {
     if (showToast) toast('Preview settings saved locally', 'ok');
@@ -1711,7 +2062,10 @@ async function saveSettings(showToast = false) {
         selectedVersion: '1.21.4',
         vanillaVersion: cfg.vanillaVersion,
         pulseLoaderId: cfg.pulseLoaderId,
-        vanillaLoaderId: cfg.vanillaLoaderId
+        vanillaLoaderId: cfg.vanillaLoaderId,
+        curseforgeKey: cfg.curseforgeKey,
+        modSource: cfg.modSource,
+        language: cfg.language
       })
     });
     if (showToast) toast('Settings saved', 'ok');
@@ -1720,7 +2074,44 @@ async function saveSettings(showToast = false) {
   }
 }
 
-// ── Spotify modal dialog ──────────────────────────────────────────────────────
+/* ── Язык интерфейса ──────────────────────────────────────────────────────────
+   Сам словарь живёт в js/i18n.js. Здесь только применение: заполнить список
+   языков, сохранить выбор и перерисовать то, что строится из JS — статичную
+   разметку i18n переводит сам. */
+function applyLanguage(code, persist) {
+  const wanted = code === 'en' ? 'en' : 'ru';
+  cfg.language = wanted;
+  I18N.setLang(wanted);
+  if (persist !== false) saveSettings();
+
+  const select = $('#langSelect');
+  if (select) {
+    if (!select.options.length) {
+      for (const l of I18N.langs) select.appendChild(new Option(l.label, l.code));
+    }
+    select.value = wanted;
+  }
+  // Перерисовываем то, что собрано в JS: подписи режима, список версий,
+  // установленные моды и панель аккаунтов
+  try {
+    setMode(currentMode, false);
+    renderVersionList();
+    renderMods();
+    renderAccounts();
+  } catch (error) {
+    console.warn('[i18n] часть интерфейса не перерисовалась:', error.message);
+  }
+}
+
+/* Из i18n.js: там язык меняется из туториала, и интерфейс должен последовать */
+window.saveLanguage = (code) => applyLanguage(code, true);
+
+/* Кнопка «Пройти обучение заново» в настройках */
+function startTutorial() {
+  if (window.Tutorial) window.Tutorial.start(true);
+}
+
+/* ── Spotify modal dialog ──────────────────────────────────────────────────────
 
 /** Open the Spotify setup/info modal */
 function openSpotifyModal() {
@@ -2520,10 +2911,4 @@ async function playMP3File(filename) {
 
 function openMusicFolder() {
   window.pulse?.openFolder();
-}
-
-function escapeHtml(str) {
-  const div = document.createElement('div');
-  div.textContent = str;
-  return div.innerHTML;
 }

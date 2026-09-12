@@ -58,6 +58,9 @@ public class WebServer {
         server.createContext("/api/mods/install-performance", this::handleInstallPerformance);
         server.createContext("/api/catalog/loaders", this::handleLoadersCatalog);
         server.createContext("/api/catalog/mods", this::handleModsCatalog);
+        server.createContext("/api/catalog/categories", this::handleCatalogCategories);
+        server.createContext("/api/catalog/project", this::handleCatalogProject);
+        server.createContext("/api/catalog/versions", this::handleCatalogVersions);
         server.createContext("/api/config", this::handleConfig);
         // Учётные записи. Более длинные пути регистрируются отдельно: HttpServer
         // выбирает контекст по самому длинному совпадению префикса.
@@ -442,14 +445,26 @@ public class WebServer {
         if (!ex.getRequestMethod().equalsIgnoreCase("POST")) { send(ex, 405, "text/plain", "POST only"); return; }
         try {
             JsonObject body = GSON.fromJson(readBody(ex), JsonObject.class);
-            String slug      = body.has("slug")      ? body.get("slug").getAsString()      : "";
             String mcVersion = body.has("mcVersion") ? body.get("mcVersion").getAsString() : LauncherConfig.get().selectedVersion;
             String loader    = body.has("loader")    ? body.get("loader").getAsString()    : "fabric";
             // "mode" tells us which profile folder to use (pulse or vanilla)
             String mode      = body.has("mode")      ? body.get("mode").getAsString()      : LauncherConfig.get().lastMode;
-            if (slug.isBlank()) { sendJson(ex, 400, Map.of("ok", false, "error", "slug is required")); return; }
-            String filename = ModInstallService.install(slug, mcVersion, loader, mode);
-            sendJson(ex, 200, Map.of("ok", true, "filename", filename, "mode", mode));
+
+            /* Две дороги. Обычная — по slug, когда ставится последняя подходящая
+               версия. Вторая — по прямой ссылке: так ставится конкретная версия,
+               выбранная вручную, и она одна на оба источника. */
+            String fileName;
+            if (body.has("downloadUrl") && !body.get("downloadUrl").getAsString().isBlank()) {
+                fileName = ModInstallService.installFromUrl(
+                    body.get("downloadUrl").getAsString(),
+                    body.has("fileName") ? body.get("fileName").getAsString() : "",
+                    mcVersion, mode);
+            } else {
+                String slug = body.has("slug") ? body.get("slug").getAsString() : "";
+                if (slug.isBlank()) { sendJson(ex, 400, Map.of("ok", false, "error", "slug is required")); return; }
+                fileName = ModInstallService.install(slug, mcVersion, loader, mode);
+            }
+            sendJson(ex, 200, Map.of("ok", true, "filename", fileName, "mode", mode));
         } catch (Exception e) {
             sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
         }
@@ -548,13 +563,64 @@ public class WebServer {
             String version = queryParam(ex, "version", LauncherConfig.get().vanillaVersion);
             String loader = queryParam(ex, "loader", "fabric");
             String query = queryParam(ex, "query", "");
+            String source = queryParam(ex, "source", LauncherConfig.get().modSource);
             int limit = Integer.parseInt(queryParam(ex, "limit", "12"));
+            int offset = Integer.parseInt(queryParam(ex, "offset", "0"));
+            // Пустая строка означает «группы не выбраны» — тогда фильтра нет
+            String categoriesParam = queryParam(ex, "categories", "");
+            List<String> categories = categoriesParam.isBlank()
+                ? List.of()
+                : List.of(categoriesParam.split(","));
             sendJson(ex, 200, Map.of(
                 "ok", true,
                 "version", version,
                 "loader", loader,
-                "results", CatalogService.searchMods(version, loader, query, limit)
+                "source", source,
+                "offset", offset,
+                "results", CatalogService.searchMods(version, loader, query, limit, source, categories, offset)
             ));
+        } catch (Exception e) {
+            sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
+        }
+    }
+
+    /** Группы модов. Список один на оба источника — см. CatalogService.CATEGORIES. */
+    private void handleCatalogCategories(HttpExchange ex) throws IOException {
+        cors(ex);
+        if (ex.getRequestMethod().equalsIgnoreCase("OPTIONS")) { send(ex, 204, "text/plain", ""); return; }
+        try {
+            sendJson(ex, 200, Map.of("ok", true, "categories", CatalogService.categories()));
+        } catch (Exception e) {
+            sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
+        }
+    }
+
+    /** Полное описание проекта: у Modrinth это markdown, у CurseForge — HTML. */
+    private void handleCatalogProject(HttpExchange ex) throws IOException {
+        cors(ex);
+        if (ex.getRequestMethod().equalsIgnoreCase("OPTIONS")) { send(ex, 204, "text/plain", ""); return; }
+        try {
+            String slug = queryParam(ex, "slug", "");
+            String source = queryParam(ex, "source", LauncherConfig.get().modSource);
+            if (slug.isBlank()) { sendJson(ex, 400, Map.of("ok", false, "error", "slug is required")); return; }
+            sendJson(ex, 200, Map.of("ok", true, "project", CatalogService.projectDetail(source, slug)));
+        } catch (Exception e) {
+            sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
+        }
+    }
+
+    /** Список версий проекта под текущую сборку — для выбора вручную. */
+    private void handleCatalogVersions(HttpExchange ex) throws IOException {
+        cors(ex);
+        if (ex.getRequestMethod().equalsIgnoreCase("OPTIONS")) { send(ex, 204, "text/plain", ""); return; }
+        try {
+            String slug = queryParam(ex, "slug", "");
+            String source = queryParam(ex, "source", LauncherConfig.get().modSource);
+            String version = queryParam(ex, "version", "");
+            String loader = queryParam(ex, "loader", "");
+            if (slug.isBlank()) { sendJson(ex, 400, Map.of("ok", false, "error", "slug is required")); return; }
+            sendJson(ex, 200, Map.of("ok", true,
+                "versions", CatalogService.projectVersions(source, slug, version, loader)));
         } catch (Exception e) {
             sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
         }
@@ -583,6 +649,8 @@ public class WebServer {
             if (body.has("userName")) cfg.userName = body.get("userName").getAsString();
             if (body.has("javaPath")) cfg.javaPath = body.get("javaPath").getAsString();
             if (body.has("msaClientId")) cfg.msaClientId = body.get("msaClientId").getAsString().trim();
+            if (body.has("curseforgeKey")) cfg.curseforgeKey = body.get("curseforgeKey").getAsString().trim();
+            if (body.has("modSource")) cfg.modSource = body.get("modSource").getAsString().trim();
             if (body.has("selectedVersion")) cfg.selectedVersion = body.get("selectedVersion").getAsString();
             if (body.has("vanillaVersion")) cfg.vanillaVersion = body.get("vanillaVersion").getAsString();
             if (body.has("pulseLoaderId")) cfg.pulseLoaderId = body.get("pulseLoaderId").getAsString();

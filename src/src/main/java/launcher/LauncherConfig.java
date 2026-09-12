@@ -46,6 +46,13 @@ public class LauncherConfig {
     public String javaPath = "";
     /** Client ID приложения Azure для входа Microsoft. Публичный клиент, секрета нет. */
     public String msaClientId = "";
+    /**
+     * Личный ключ CurseForge. Пусто — идём через публичный прокси api.curse.tools,
+     * он работает без ключа. Ключ вписан — обращаемся напрямую в официальный API.
+     */
+    public String curseforgeKey = "";
+    /** Источник каталога модов по умолчанию: "modrinth" или "curseforge". */
+    public String modSource = "modrinth";
 
     // ── Base directories ────────────────────────────────────────────────────
 

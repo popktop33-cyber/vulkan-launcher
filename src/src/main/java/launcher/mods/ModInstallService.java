@@ -83,10 +83,26 @@ public class ModInstallService {
         }
         if (downloadUrl == null) throw new Exception("No download URL for " + slug);
 
-        // Route to the correct profile mods directory
+        return installFromUrl(downloadUrl, filename, mcVersion, mode);
+    }
+
+    /**
+     * Скачать мод по прямой ссылке в нужный профиль.
+     *
+     * Нужен, когда версия выбрана вручную: и Modrinth, и CurseForge отдают в
+     * списке версий готовые downloadUrl и fileName, поэтому выбор источника
+     * дальше ни на что не влияет — общая дорога на оба.
+     */
+    public static String installFromUrl(String downloadUrl, String fileName,
+                                        String mcVersion, String mode) throws Exception {
+        if (downloadUrl == null || downloadUrl.isBlank()) {
+            throw new Exception("Не указана ссылка на файл");
+        }
+        String safeName = safeFileName(fileName, downloadUrl);
+
         Path modsDir = LauncherConfig.modsDir(mcVersion, mode);
         Files.createDirectories(modsDir);
-        Path dest = modsDir.resolve(filename);
+        Path dest = modsDir.resolve(safeName);
 
         // NOTE: BodyHandlers.ofFile() throws NoSuchFileException on HTTP/2 CDNs
         // (Cloudflare, used by Modrinth). Download to memory, verify status, then write.
@@ -95,17 +111,45 @@ public class ModInstallService {
             .build();
         HttpResponse<byte[]> dlResp = HTTP.send(dlReq, HttpResponse.BodyHandlers.ofByteArray());
         if (dlResp.statusCode() != 200) {
-            throw new IOException("Download HTTP " + dlResp.statusCode() + " for " + filename);
+            throw new IOException("Download HTTP " + dlResp.statusCode() + " for " + safeName);
         }
         byte[] data = dlResp.body();
         if (data == null || data.length == 0) {
-            throw new IOException("Empty download for " + filename);
+            throw new IOException("Empty download for " + safeName);
         }
         Files.write(dest, data, StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING);
 
-        System.out.println("[pulsePLUS] Installed mod [" + mode + "]: " + filename
+        System.out.println("[pulsePLUS] Installed mod [" + mode + "]: " + safeName
             + " (" + data.length + " bytes) → " + modsDir);
-        return filename;
+        return safeName;
+    }
+
+    /**
+     * Имя файла приходит из чужого API, а используется как элемент пути. Имя
+     * вида «../../startup.jar» записало бы файл куда угодно, поэтому берём
+     * только последний сегмент и вычищаем из него разделители и двоеточие
+     * (на Windows двоеточие — это ещё и обозначение диска).
+     */
+    private static String safeFileName(String fileName, String downloadUrl) {
+        String name = fileName == null ? "" : fileName.trim();
+        if (name.isEmpty()) {
+            String path = downloadUrl.split("[?#]")[0];
+            int slash = path.lastIndexOf('/');
+            name = slash >= 0 ? path.substring(slash + 1) : path;
+            try {
+                name = java.net.URLDecoder.decode(name, StandardCharsets.UTF_8);
+            } catch (Exception ignored) {
+                // Битая кодировка в ссылке — оставляем как есть
+            }
+        }
+        name = name.replace('\\', '/');
+        int slash = name.lastIndexOf('/');
+        if (slash >= 0) name = name.substring(slash + 1);
+        name = name.replaceAll("[\\\\:*?\"<>|\\x00-\\x1f]", "").trim();
+        if (name.isEmpty() || name.equals(".") || name.equals("..")) {
+            name = "mod-" + System.currentTimeMillis() + ".jar";
+        }
+        return name;
     }
 
     /** Legacy overload — defaults to pulse profile */
