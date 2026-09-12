@@ -16,6 +16,7 @@
     "asar": false,
     "files": [
       "main.js",
+      "discord.js",
       "preload.js",
       "welcome.html",
       "icon.ico",

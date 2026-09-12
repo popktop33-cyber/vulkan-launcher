@@ -8,10 +8,16 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const os = require('os');
+const { DiscordRpc } = require('./discord');
 
 const PORT = 47820;
 const API_URL = 'http://127.0.0.1:' + PORT + '/api/state';
+const PROGRESS_URL = 'http://127.0.0.1:' + PORT + '/api/launch/progress';
 const FRONTEND_VERSION = '20260706-0004';
+
+// Application ID приложения Discord для лаунчера. Публичный ключ из настроек
+// приложения для Rich Presence не нужен — Discord его не использует.
+const DISCORD_APP_ID = '1548305497390850160';
 let backend = null;
 let win = null;
 let splash = null;
@@ -223,6 +229,100 @@ function waitForServer(cb, tries = 0) {
   });
 }
 
+// ── Discord Rich Presence ───────────────────────────────────────────────────
+//
+// Бэкенд уже публикует стадию запуска в /api/launch/progress, поэтому статус
+// строим по ней, а не по догадкам. Discord может быть не запущен — это обычная
+// ситуация, клиент сам молча ждёт и переподключается.
+
+let rpc = null;
+let presenceTimer = null;
+let gameLabel = 'Minecraft';
+let lastPresence = '';
+const appStartedAt = Date.now();
+
+function fetchJson(url, cb) {
+  http.get(url, (res) => {
+    let body = '';
+    res.on('data', (c) => { body += c; });
+    res.on('end', () => {
+      try { cb(JSON.parse(body)); } catch (_) { cb(null); }
+    });
+  }).on('error', () => cb(null));
+}
+
+function applyPresence(progress) {
+  if (!rpc || !rpc.enabled) return;
+  const stage = (progress && progress.stage) || 'idle';
+  let activity;
+
+  if (stage === 'preparing') {
+    activity = {
+      details: 'Запускает Minecraft',
+      state: (progress && progress.message) || 'Подготовка',
+      timestamps: { start: Date.now() },
+      assets: { large_image: 'vulkan', large_text: 'vulkan launcher' }
+    };
+  } else if (stage === 'running') {
+    activity = {
+      details: 'Играет в Minecraft',
+      state: gameLabel,
+      timestamps: { start: Date.now() },
+      assets: { large_image: 'vulkan', large_text: 'vulkan launcher' }
+    };
+  } else if (stage === 'error') {
+    activity = {
+      details: 'Ошибка запуска',
+      state: (progress && progress.message) || 'не удалось запустить',
+      timestamps: { start: appStartedAt },
+      assets: { large_image: 'vulkan', large_text: 'vulkan launcher' }
+    };
+  } else {
+    activity = {
+      details: 'В лаунчере',
+      state: 'выбирает сборку',
+      timestamps: { start: appStartedAt },
+      assets: { large_image: 'vulkan', large_text: 'vulkan launcher' }
+    };
+  }
+
+  // Discord не любит лишние обновления — шлём только при смене статуса
+  const key = JSON.stringify(activity);
+  if (key === lastPresence) return;
+  lastPresence = key;
+  rpc.setActivity(activity);
+}
+
+function startDiscord() {
+  const cfg = readConfig();
+  const appId = (cfg && cfg.discordLauncherAppId) || DISCORD_APP_ID;
+  rpc = new DiscordRpc(appId, (msg) => console.log(msg));
+  if (!rpc.enabled) return;
+  rpc.start();
+
+  // Название сборки берём один раз: оно меняется только через настройки
+  fetchJson(API_URL, (state) => {
+    if (state) {
+      const version = state.vanillaVersion || state.selectedVersion || '1.21.4';
+      const mode = state.lastMode === 'vanilla' ? 'Vanilla' : 'vulkan';
+      gameLabel = `Minecraft ${version} · ${mode}`;
+    }
+  });
+
+  presenceTimer = setInterval(() => {
+    fetchJson(PROGRESS_URL, (progress) => applyPresence(progress));
+  }, 4000);
+  fetchJson(PROGRESS_URL, (progress) => applyPresence(progress));
+}
+
+function stopDiscord() {
+  clearInterval(presenceTimer);
+  presenceTimer = null;
+  if (rpc) rpc.stop();
+  rpc = null;
+  lastPresence = '';
+}
+
 // Create the launcher window.
 async function createWindow() {
   win = new BrowserWindow({
@@ -281,6 +381,7 @@ ipcMain.on('win-max', () => {
 });
 ipcMain.on('win-close', () => {
   quitting = true;              // suppress backend auto-restart
+  stopDiscord();
   killBackend();
   app.quit();
 });
@@ -376,6 +477,7 @@ app.whenReady().then(() => {
   createSplash();               // instant welcome while the backend boots
   seedVideos();                 // lay backgrounds into %APPDATA%\pulsePLUS\videos
   startBackend();
+  startDiscord();
   waitForServer(createWindow);
 });
 
@@ -384,7 +486,7 @@ app.on('window-all-closed', () => {
   killBackend();
   app.quit();
 });
-app.on('before-quit', () => { quitting = true; killBackend(); });
+app.on('before-quit', () => { quitting = true; stopDiscord(); killBackend(); });
 app.on('activate', () => {
   if (win === null) waitForServer(createWindow);
 });
