@@ -48,6 +48,7 @@ public class WebServer {
         server.createContext("/", this::handleStatic);
         server.createContext("/api/state", this::handleState);
         server.createContext("/api/versions", this::handleVersions);
+        server.createContext("/api/instance-dir", this::handleInstanceDir);
         server.createContext("/api/launch", this::handleLaunch);
         server.createContext("/api/launch/progress", this::handleLaunchProgress);
         server.createContext("/api/mods", this::handleMods);
@@ -139,9 +140,16 @@ public class WebServer {
         out.put("pulseLoaderId", cfg.pulseLoaderId);
         out.put("vanillaLoaderId", cfg.vanillaLoaderId);
         // Use LinkedHashMap so all paths are always serialized (Map.of has iteration-order quirks in GSON)
+        // minecraft/vanilla — папки выбранных сборок, а не старые папки профилей:
+        // ключи оставлены прежними, чтобы не ломать ни оболочку, ни окно.
         Map<String, String> paths = new LinkedHashMap<>();
-        paths.put("minecraft",    LauncherConfig.minecraftGameDir().toString());
-        paths.put("vanilla",      LauncherConfig.vanillaGameDir().toString());
+        paths.put("minecraft",    LauncherConfig.gameDir("pulse").toString());
+        paths.put("vanilla",      LauncherConfig.gameDir("vanilla").toString());
+        paths.put("instances",    LauncherConfig.instancesDir().toString());
+        paths.put("pulseInstance",   LauncherConfig.instanceName(LauncherConfig.versionFor("pulse"),
+                                                                  LauncherConfig.loaderIdFor("pulse")));
+        paths.put("vanillaInstance", LauncherConfig.instanceName(LauncherConfig.versionFor("vanilla"),
+                                                                  LauncherConfig.loaderIdFor("vanilla")));
         paths.put("mods",         LauncherConfig.modsDir(cfg.selectedVersion).toString());
         paths.put("downloadedMods", LauncherConfig.downloadedModsDir().toString());
         paths.put("music",        LauncherConfig.musicDir().toString());
@@ -279,6 +287,41 @@ public class WebServer {
             Map<String, Object> out = new LinkedHashMap<>();
             out.put("popular", VersionManager.getPopularVersions());
             out.put("versions", VersionManager.getCatalogVersions());
+            sendJson(ex, 200, out);
+        } catch (Exception e) {
+            sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
+        }
+    }
+
+    /**
+     * Папка сборки для выбранной версии и загрузчика.
+     *
+     * Имя сборки складывается из версии и загрузчика по правилам загрузчиков
+     * (см. LauncherConfig.instanceName), и повторять это правило в JavaScript
+     * значило бы однажды разойтись с ним. Поэтому имя считает бэкенд, а окно
+     * только спрашивает готовый путь — чтобы кнопка «dir» открывала ту самую
+     * папку, в которую игра пишет миры, и всегда для текущего выбора.
+     */
+    private void handleInstanceDir(HttpExchange ex) throws IOException {
+        cors(ex);
+        if (ex.getRequestMethod().equalsIgnoreCase("OPTIONS")) {
+            send(ex, 204, "text/plain", "");
+            return;
+        }
+        try {
+            LauncherConfig cfg = LauncherConfig.get();
+            String mode = queryParam(ex, "mode", cfg.lastMode);
+            String version = queryParam(ex, "version", LauncherConfig.versionFor(mode));
+            String loader = queryParam(ex, "loader", LauncherConfig.loaderIdFor(mode));
+
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("ok", true);
+            out.put("mode", mode);
+            out.put("version", version);
+            out.put("loader", loader);
+            out.put("name", LauncherConfig.instanceName(version, loader));
+            out.put("dir", LauncherConfig.instanceDir(version, loader).toAbsolutePath().toString());
+            out.put("root", LauncherConfig.instancesDir().toAbsolutePath().toString());
             sendJson(ex, 200, out);
         } catch (Exception e) {
             sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
@@ -445,10 +488,14 @@ public class WebServer {
         if (!ex.getRequestMethod().equalsIgnoreCase("POST")) { send(ex, 405, "text/plain", "POST only"); return; }
         try {
             JsonObject body = GSON.fromJson(readBody(ex), JsonObject.class);
-            String mcVersion = body.has("mcVersion") ? body.get("mcVersion").getAsString() : LauncherConfig.get().selectedVersion;
-            String loader    = body.has("loader")    ? body.get("loader").getAsString()    : "fabric";
             // "mode" tells us which profile folder to use (pulse or vanilla)
             String mode      = body.has("mode")      ? body.get("mode").getAsString()      : LauncherConfig.get().lastMode;
+            // Умолчание — версия ЭТОГО профиля. Раньше здесь всегда стояла
+            // selectedVersion (версия pulse), и это сходило с рук, пока моды
+            // лежали в общей папке профиля; теперь из версии складывается имя
+            // сборки, и мод уехал бы в несуществующую сборку чужого профиля.
+            String mcVersion = body.has("mcVersion") ? body.get("mcVersion").getAsString() : LauncherConfig.versionFor(mode);
+            String loader    = body.has("loader")    ? body.get("loader").getAsString()    : "fabric";
 
             /* Две дороги. Обычная — по slug, когда ставится последняя подходящая
                версия. Вторая — по прямой ссылке: так ставится конкретная версия,
@@ -481,13 +528,12 @@ public class WebServer {
         if (!ex.getRequestMethod().equalsIgnoreCase("POST")) { send(ex, 405, "text/plain", "POST only"); return; }
         try {
             JsonObject body = GSON.fromJson(readBody(ex), JsonObject.class);
-            LauncherConfig cfg = LauncherConfig.get();
-            String mcVersion = body != null && body.has("mcVersion")
-                ? body.get("mcVersion").getAsString() : cfg.vanillaVersion;
-            String loader = body != null && body.has("loader")
-                ? body.get("loader").getAsString() : "fabric";
             String mode = body != null && body.has("mode")
                 ? body.get("mode").getAsString() : "vanilla";
+            String mcVersion = body != null && body.has("mcVersion")
+                ? body.get("mcVersion").getAsString() : LauncherConfig.versionFor(mode);
+            String loader = body != null && body.has("loader")
+                ? body.get("loader").getAsString() : "fabric";
 
             List<Map<String, Object>> rows = new ArrayList<>();
             int ok = 0;
@@ -525,9 +571,9 @@ public class WebServer {
         if (!ex.getRequestMethod().equalsIgnoreCase("POST")) { send(ex, 405, "text/plain", "POST only"); return; }
         try {
             JsonObject body  = GSON.fromJson(readBody(ex), JsonObject.class);
-            String mcVersion = body.has("mcVersion") ? body.get("mcVersion").getAsString() : LauncherConfig.get().selectedVersion;
-            String loader    = body.has("loader")    ? body.get("loader").getAsString()    : "fabric";
             String mode      = body.has("mode")      ? body.get("mode").getAsString()      : LauncherConfig.get().lastMode;
+            String mcVersion = body.has("mcVersion") ? body.get("mcVersion").getAsString() : LauncherConfig.versionFor(mode);
+            String loader    = body.has("loader")    ? body.get("loader").getAsString()    : "fabric";
             List<String> installed = ModInstallService.autoInstall(mcVersion, loader, mode);
             sendJson(ex, 200, Map.of("ok", true, "installed", installed));
         } catch (Exception e) {

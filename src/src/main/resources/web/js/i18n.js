@@ -39,6 +39,9 @@
       'title.maximize': 'Развернуть',
       'title.close': 'Закрыть',
       'title.folder': 'Открыть папку',
+      // Кнопка DIR ведёт в папку сборки — у каждой версии с загрузчиком своя.
+      'folder.opened': 'Папка сборки: {path}',
+      'folder.path': 'Папка сборки: {path}',
 
       // ── Сайдбар ────────────────────────────────────────────────────────────
       'nav.play': 'Play',
@@ -304,6 +307,8 @@
       'title.maximize': 'Maximize',
       'title.close': 'Close',
       'title.folder': 'Open folder',
+      'folder.opened': 'Instance folder: {path}',
+      'folder.path': 'Instance folder: {path}',
 
       'nav.play': 'Play',
       'nav.mods': 'Mods',

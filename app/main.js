@@ -106,8 +106,27 @@ function readConfig() {
   return null;
 }
 
-function gameDir() {
-  return path.join(process.env.APPDATA || os.homedir(), 'pulsePLUS', 'minecraft');
+function dataDir() {
+  return path.join(process.env.APPDATA || os.homedir(), 'pulsePLUS');
+}
+
+/*
+ * Кнопка DIR открывает папку сборки, а не общую: у каждой версии с загрузчиком
+ * она своя. Путь называет окно — вернее, бэкенд, который один знает правила
+ * именования сборок (LauncherConfig.instanceName); здесь их повторять не надо.
+ *
+ * Но окно для оболочки — такая же недоверенная сторона, как страница в
+ * браузере, и принимать от него любой путь нельзя: иначе кнопка стала бы
+ * способом открыть в проводнике что угодно. Пускаем только внутрь папки
+ * данных лаунчера; всё прочее молча уезжает в корень сборок.
+ */
+function safeFolder(wanted) {
+  const data = path.resolve(dataDir());
+  if (typeof wanted === 'string' && wanted.trim()) {
+    const dir = path.resolve(wanted.trim());
+    if (dir === data || dir.startsWith(data + path.sep)) return dir;
+  }
+  return path.join(data, 'instances');
 }
 
 // Backgrounds live in the launcher data dir so they can be replaced without touching
@@ -408,9 +427,9 @@ ipcMain.on('win-close', () => {
   killBackend();
   app.quit();
 });
-ipcMain.on('open-folder', () => {
-  const d = gameDir();
-  fs.mkdirSync(d, { recursive: true });
+ipcMain.on('open-folder', (_, wanted) => {
+  const d = safeFolder(wanted);
+  try { fs.mkdirSync(d, { recursive: true }); } catch (_) {}
   shell.openPath(d);
 });
 ipcMain.on('open-external', (_, url) => {
@@ -430,13 +449,6 @@ ipcMain.on('set-mode', (_, mode) => {
     const icon = iconPath(mode);
     if (icon) win.setIcon(icon);
   }
-});
-
-// Open the vulkan or vanilla game folder
-ipcMain.on('open-folder-vanilla', () => {
-  const d = path.join(process.env.APPDATA || os.homedir(), 'pulsePLUS', 'vanilla');
-  fs.mkdirSync(d, { recursive: true });
-  shell.openPath(d);
 });
 
 // Launch via Node http — bypasses browser fetch restrictions

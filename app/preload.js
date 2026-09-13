@@ -5,8 +5,9 @@ contextBridge.exposeInMainWorld('pulse', {
   minimize:          () => ipcRenderer.send('win-min'),
   maximize:          () => ipcRenderer.send('win-max'),
   close:             () => ipcRenderer.send('win-close'),
-  openFolder:        () => ipcRenderer.send('open-folder'),
-  openFolderVanilla: () => ipcRenderer.send('open-folder-vanilla'),
+  // dir — путь к папке сборки; его называет бэкенд (/api/instance-dir).
+  // Без аргумента откроется корень сборок. Путь вне папки данных отсекается.
+  openFolder:        (dir)   => ipcRenderer.send('open-folder', dir),
   openExternal:      (url)   => ipcRenderer.send('open-external', url),
   openSpotifyPlayer: (url)   => ipcRenderer.send('open-spotify-player', url),
   setTitle:          (title) => ipcRenderer.send('set-title', title),

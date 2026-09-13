@@ -18,8 +18,14 @@ public class Main {
             }
         }
 
-        Files.createDirectories(LauncherConfig.dataDir().resolve("minecraft").resolve("mods"));
-        Files.createDirectories(LauncherConfig.vanillaGameDir());
+        // Первым делом — переезд со старых папок профилей на сборки. Именно
+        // до создания папок: пустая заготовка сборки встретила бы перенос и он
+        // прошёл бы вхолостую, оставив миры и моды в старой папке.
+        ProfileMigrator.migrate();
+
+        // По папке на каждую выбранную сборку: своя mods, свои миры.
+        Files.createDirectories(LauncherConfig.gameDir("pulse").resolve("mods"));
+        Files.createDirectories(LauncherConfig.gameDir("vanilla"));
 
         WebServer server = new WebServer(port);
         server.start();

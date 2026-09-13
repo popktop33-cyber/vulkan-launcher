@@ -34,8 +34,10 @@ public class MinecraftLauncher {
 
         LauncherConfig cfg = LauncherConfig.get();
 
-        // Profile dir = saves, mods, config — isolated per profile
-        Path profileDir = LauncherConfig.gameDir(mode);
+        // Папка сборки: mods, saves, config — у каждой версии с загрузчиком свои,
+        // и запущенная сборка берётся из аргументов, а не из настроек: запускают
+        // именно то, что выбрано в окне, даже если настройки ещё не сохранены.
+        Path profileDir = LauncherConfig.instanceDir(mcVersion, loaderId);
         Files.createDirectories(profileDir);
         Files.createDirectories(profileDir.resolve("mods"));
 
@@ -89,13 +91,15 @@ public class MinecraftLauncher {
             // Auto-update: use the newest loader build when enabled (they're backward-compatible)
             if (cfg.autoUpdateMods) fabricBuild = latestMetaLoaderBuild(FABRIC_META, mcVersion, fabricBuild);
             LaunchProgress.update("fabric", 44, "Установка Fabric " + fabricBuild + "...");
-            String fabricMain = applyMetaLoader(FABRIC_META, mcVersion, fabricBuild, libsDir, classpath, "Fabric");
+            String fabricMain = applyMetaLoader(FABRIC_META, mcVersion, fabricBuild, libsDir, classpath,
+                "Fabric", "fabric", tlVersionsDir);
             if (fabricMain != null) mainClass = fabricMain;
         } else if (loaderId != null && loaderId.startsWith("quilt:")) {
             fabricBuild = parseFabricBuild(loaderId);   // same "family:build@mc" format
             if (cfg.autoUpdateMods) fabricBuild = latestMetaLoaderBuild(QUILT_META, mcVersion, fabricBuild);
             LaunchProgress.update("quilt", 44, "Установка Quilt " + fabricBuild + "...");
-            String quiltMain = applyMetaLoader(QUILT_META, mcVersion, fabricBuild, libsDir, classpath, "Quilt");
+            String quiltMain = applyMetaLoader(QUILT_META, mcVersion, fabricBuild, libsDir, classpath,
+                "Quilt", "quilt", tlVersionsDir);
             if (quiltMain != null) mainClass = quiltMain;
         }
 
@@ -166,7 +170,7 @@ public class MinecraftLauncher {
         // Redirect the game's output to its own log file so it never blocks.
         Path logsDir = LauncherConfig.logsDir();
         Files.createDirectories(logsDir);
-        Path gameLog = logsDir.resolve("minecraft-" + mode + ".log");
+        Path gameLog = logsDir.resolve("minecraft-" + profileDir.getFileName() + ".log");
 
         LaunchProgress.update("starting", 97, "Запуск игры...");
         System.out.println("[pulsePLUS] Launching " + mcVersion
@@ -202,7 +206,7 @@ public class MinecraftLauncher {
 
     private static void launchModpackLoader(String mcVersion, String mode, String loaderId, String family) throws Exception {
         LauncherConfig cfg = LauncherConfig.get();
-        Path profileDir = LauncherConfig.gameDir(mode);
+        Path profileDir = LauncherConfig.instanceDir(mcVersion, loaderId);
         Files.createDirectories(profileDir);
         Files.createDirectories(profileDir.resolve("mods"));
 
@@ -362,7 +366,7 @@ public class MinecraftLauncher {
 
         Path logsDir = LauncherConfig.logsDir();
         Files.createDirectories(logsDir);
-        Path gameLog = logsDir.resolve("minecraft-" + mode + ".log");
+        Path gameLog = logsDir.resolve("minecraft-" + profileDir.getFileName() + ".log");
 
         System.out.println("[pulsePLUS] Launching " + versionName + " (" + family + ") → " + profileDir);
         new ProcessBuilder(cmd)
@@ -575,6 +579,11 @@ public class MinecraftLauncher {
     // the loader libraries (each with a maven base url) and the main class. Everything
     // is fetched straight from their meta APIs — fully self-contained, no external
     // launcher required.
+    //
+    // Профиль сохраняется на диск как обычная версия (см. LoaderStore): сама игра
+    // запускается прежним ванильным путём — Fabric и Quilt лишь добавляют
+    // библиотеки и подменяют главный класс, — но описание сборки остаётся
+    // лежать рядом с версиями, и по нему видно, что она уже собрана.
 
     /** Newest loader build for the given MC version from a Fabric/Quilt meta API, or the fallback. */
     private static String latestMetaLoaderBuild(String metaBase, String mcVersion, String fallback) {
@@ -601,15 +610,49 @@ public class MinecraftLauncher {
         return fallback;
     }
 
+    /**
+     * Применить загрузчик из мета-API Fabric/Quilt.
+     *
+     * Описание сборки кладётся на диск — в свою папку рядом с версиями игры,
+     * ровно как это делают установщики Forge и NeoForge. Отсюда два следствия:
+     * сборка становится видна в списке версий (её находят по {@code inheritsFrom}),
+     * а повторный запуск читает описание с диска и не ходит за ним в сеть.
+     *
+     * Пишем только после того, как библиотеки разложены: описание — это признак
+     * «сборка готова», и оставить его при оборванной загрузке значит соврать
+     * следующему запуску, что качать уже нечего.
+     */
     private static String applyMetaLoader(String metaBase, String mcVersion, String loaderBuild,
-                                          Path libsDir, List<Path> classpath, String label) throws Exception {
-        String profileUrl = metaBase + mcVersion + "/" + loaderBuild + "/profile/json";
-        System.out.println("[pulsePLUS] Fetching " + label + " profile: " + profileUrl);
-        String body;
-        try { body = fetchString(profileUrl); }
-        catch (Exception e) { System.err.println("[pulsePLUS] " + label + " profile fetch failed: " + e.getMessage()); return null; }
+                                          Path libsDir, List<Path> classpath, String label,
+                                          String family, Path versionsDir) throws Exception {
+        Path jsonPath = LoaderStore.jsonFor(versionsDir, family, loaderBuild, mcVersion);
+        JsonObject profile = null;
+        boolean fromDisk = false;
 
-        JsonObject profile = GSON.fromJson(body, JsonObject.class);
+        if (Files.isRegularFile(jsonPath)) {
+            try {
+                profile = GSON.fromJson(Files.readString(jsonPath), JsonObject.class);
+                fromDisk = profile != null && profile.has("libraries");
+            } catch (Exception broken) {
+                profile = null;
+            }
+            if (!fromDisk) {
+                System.err.println("[pulsePLUS] " + label + ": описание сборки нечитаемо, беру заново");
+                profile = null;
+            }
+        }
+
+        if (profile == null) {
+            String profileUrl = metaBase + mcVersion + "/" + loaderBuild + "/profile/json";
+            System.out.println("[pulsePLUS] Fetching " + label + " profile: " + profileUrl);
+            String body;
+            try { body = fetchString(profileUrl); }
+            catch (Exception e) { System.err.println("[pulsePLUS] " + label + " profile fetch failed: " + e.getMessage()); return null; }
+            profile = GSON.fromJson(body, JsonObject.class);
+        } else {
+            System.out.println("[pulsePLUS] " + label + " уже установлен: " + jsonPath.getParent().getFileName());
+        }
+
         String loaderMain = profile.has("mainClass") ? profile.get("mainClass").getAsString() : null;
 
         if (profile.has("libraries")) {
@@ -630,6 +673,14 @@ public class MinecraftLauncher {
                 // Loader libs go first in classpath
                 if (!classpath.contains(dest)) classpath.add(0, dest);
             }
+        }
+
+        if (!fromDisk) {
+            profile.addProperty("id", jsonPath.getParent().getFileName().toString());
+            profile.addProperty("inheritsFrom", mcVersion);
+            Files.createDirectories(jsonPath.getParent());
+            Files.writeString(jsonPath, GSON.toJson(profile));
+            System.out.println("[pulsePLUS] " + label + " установлен: " + jsonPath.getParent().getFileName());
         }
         return loaderMain;
     }

@@ -19,6 +19,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import launcher.minecraft.LoaderStore;
+import launcher.minecraft.VersionManager;
 
 public final class CatalogService {
     private static final Gson GSON = new Gson();
@@ -38,13 +40,60 @@ public final class CatalogService {
         String cacheKey = version == null ? "" : version.trim();
         long now = System.currentTimeMillis();
         CacheEntry<List<Map<String, Object>>> cached = LOADER_CACHE.get(cacheKey);
+        List<Map<String, Object>> list;
         if (cached != null && now - cached.timeMs < LOADER_TTL_MS) {
-            return cached.value;
+            list = cached.value;
+        } else {
+            list = loadLoaders(cacheKey);
+            LOADER_CACHE.put(cacheKey, new CacheEntry<>(now, list));
         }
+        // Пометку «уже собрана» ставим при каждом обращении, а не один раз вместе
+        // с загрузкой списка: сам список живёт в кэше четверть часа, а сборка
+        // появляется на диске в любой момент — иначе игрок поставит загрузчик
+        // и не увидит, что тот готов, пока кэш не истечёт.
+        return withInstalled(list, cacheKey);
+    }
 
-        List<Map<String, Object>> loaded = loadLoaders(cacheKey);
-        LOADER_CACHE.put(cacheKey, new CacheEntry<>(now, loaded));
-        return loaded;
+    /**
+     * Дополнить каталог тем, что уже собрано на диске.
+     *
+     * Каждый источник отдаёт только свежую сборку своей семьи, а собранная может
+     * быть старше. Без этой вставки её не оказалось бы в списке вовсе: игрок
+     * не увидел бы ни пометки, ни возможности её выбрать — а выбранная строка
+     * молча уехала бы на свежую, то есть на новую загрузку поверх готового.
+     */
+    private static List<Map<String, Object>> withInstalled(List<Map<String, Object>> list, String mcVersion) {
+        List<Map<String, Object>> onDisk = LoaderStore.installed(mcVersion);
+        Set<String> built = new LinkedHashSet<>();
+        for (Map<String, Object> row : onDisk) built.add(loaderKey(row));
+
+        List<Map<String, Object>> out = new ArrayList<>(list);
+        Set<String> shown = new LinkedHashSet<>();
+        for (Map<String, Object> row : out) {
+            String key = loaderKey(row);
+            shown.add(key);
+            // У ваниллы отдельной сборки нет — признак тот же, что в списке версий
+            row.put("installed", "vanilla".equals(row.get("familyKey"))
+                ? VersionManager.isInstalled(mcVersion)
+                : built.contains(key));
+        }
+        for (Map<String, Object> row : onDisk) {
+            if (shown.contains(loaderKey(row))) continue;
+            Map<String, Object> extra = new LinkedHashMap<>(row);
+            extra.put("id", row.get("familyKey") + ":" + row.get("build") + "@" + mcVersion);
+            extra.put("channel", "");
+            extra.put("recommended", false);
+            extra.put("installed", true);
+            out.add(extra);
+        }
+        out.sort(Comparator
+            .comparingInt((Map<String, Object> row) -> familyOrder(String.valueOf(row.get("familyKey"))))
+            .thenComparing(row -> String.valueOf(row.get("build")), Comparator.reverseOrder()));
+        return out;
+    }
+
+    private static String loaderKey(Map<String, Object> row) {
+        return row.get("familyKey") + "|" + row.get("build");
     }
 
     /* ── Группы модов ───────────────────────────────────────────────────────────

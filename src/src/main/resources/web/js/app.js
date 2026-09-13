@@ -240,12 +240,42 @@ function loaderObject(familyKey, mcVersion, build, channel, recommended) {
   };
 }
 
-/** Open the game folder for the currently active profile (pulse → minecraft, vanilla → vanilla). */
-function openCurrentFolder() {
-  if (currentMode === 'vanilla' && window.pulse && typeof window.pulse.openFolderVanilla === 'function') {
-    window.pulse.openFolderVanilla();
-  } else if (window.pulse && typeof window.pulse.openFolder === 'function') {
-    window.pulse.openFolder();
+/**
+ * Открыть папку текущей сборки.
+ *
+ * Путь считает бэкенд, а не окно: имя сборки складывается из версии и
+ * загрузчика по тем же правилам, что и папка версии на диске, и второй такой
+ * расчёт здесь однажды разошёлся бы с первым. Кнопка открывает именно ту папку,
+ * куда игра пишет миры и моды, — свою у каждой сборки.
+ *
+ * В браузерной сборке (без Electron) проводник открыть нечем: показываем путь,
+ * по нему игрок дойдёт сам.
+ */
+async function openCurrentFolder() {
+  let dir = null;
+  try {
+    const q = `mode=${encodeURIComponent(currentMode)}`
+      + `&version=${encodeURIComponent(activeVersion())}`
+      + `&loader=${encodeURIComponent(currentLoaderId() || '')}`;
+    const info = await fetchJson(`/api/instance-dir?${q}`);
+    if (info && info.dir) dir = info.dir;
+  } catch (_) { /* покажем то, что есть: общую папку игры */ }
+
+  const fallback = cfg && cfg.paths && (currentMode === 'vanilla' ? cfg.paths.vanilla : cfg.paths.minecraft);
+  const target = dir || fallback || null;
+
+  // Проводник умеет открывать только оболочка. В браузерной сборке (та, что без
+  // Electron, для слабых машин) её нет — там показываем путь: по нему игрок
+  // дойдёт сам. Спрашивать надо именно Electron, а не наличие window.pulse:
+  // заглушка для браузера создаёт его же.
+  const inElectron = typeof window.pulse?.openFolder === 'function'
+    && /electron/i.test(navigator.userAgent || '');
+
+  if (inElectron) {
+    window.pulse.openFolder(target);
+    if (dir) toast(t('folder.opened').replace('{path}', dir));
+  } else if (target) {
+    toast(t('folder.path').replace('{path}', target));
   } else {
     toast('Open folder works in Electron build', 'ok');
   }
@@ -861,17 +891,25 @@ function renderVersionList() {
        игроку зелёным. */
     const selected = currentVersion === version.id;
     const installed = version.installed === true;
+    /* Что из этой версии уже лежит на диске. Бэкенд отдаёт сборки отдельным
+       списком, потому что у «сама игра» и у «игра плюс загрузчик» разные папки:
+       одна зелёная пометка на строку отвечала только про ваниллу, и Fabric
+       на 1.21.1 выглядел неустановленным, даже когда был собран. */
+    const builtLoaders = Array.isArray(version.loaders) ? version.loaders : [];
+    const loaderNames = builtLoaders.map((l) => l.label || `${l.family} ${l.build}`.trim());
+    const subtitle = (loaderNames.length ? loaderNames : [activeLoader().family]).join(' · ');
     const row = document.createElement('button');
     row.className = 'version-item'
       + (installed ? ' installed' : '')
       + (selected ? ' active' : '');
     row.dataset.version = version.id;
     row.title = installed ? t('ver.installed') : t('ver.notInstalled');
+    if (loaderNames.length) row.title += ` — ${loaderNames.join(', ')}`;
     row.onclick = () => syncSelectedVersion(version.id, true);
     row.innerHTML = `
       <div class="ver-text">
         <div class="ver-main">${escapeHtml(version.id)}</div>
-        <div class="ver-loader">${escapeHtml(activeLoader().family)}${
+        <div class="ver-loader">${escapeHtml(subtitle)}${
           installed ? `<span class="ver-state"> · ${escapeHtml(t('ver.installed'))}</span>` : ''
         }</div>
       </div>
@@ -966,7 +1004,13 @@ async function ensureActiveLoader() {
 
 function defaultLoaderFor(versionId, mode, loaders) {
   if (mode === 'pulse') return PREVIEW_CFG.pulseLoaderId;
-  return loaders?.find((loader) => loader.recommended)?.id
+  /* Собранное важнее «рекомендованного». Каталог предлагает самую свежую
+     сборку семьи, и по умолчанию выбор падал на неё — то есть на новую
+     загрузку поверх уже готовой. Ваниллу сюда не пускаем: она «собрана»
+     у любой скачанной версии и перебивала бы выбор загрузчика всегда. */
+  const built = loaders?.find((loader) => loader.installed && loader.familyKey !== 'vanilla');
+  return built?.id
+    || loaders?.find((loader) => loader.recommended)?.id
     || loaders?.[0]?.id
     || `vanilla:${versionId}`;
 }
@@ -1021,10 +1065,10 @@ async function renderLoaderDrawer() {
   const loaders = await availableLoaders(versionId, currentMode);
   loaders.forEach((loader, index) => {
     const button = document.createElement('button');
-    button.className = `loader-option${currentLoaderId() === loader.id ? ' active' : ''}`;
+    button.className = `loader-option${currentLoaderId() === loader.id ? ' active' : ''}${loader.installed ? ' installed' : ''}`;
     button.innerHTML = `
       <strong>${escapeHtml(loader.family)}</strong>
-      <span>${escapeHtml(loader.build)}${loader.channel ? ` - ${escapeHtml(loader.channel)}` : ''}${loader.recommended || index === 0 ? ' - preferred' : ''}</span>
+      <span>${escapeHtml(loader.build)}${loader.channel ? ` - ${escapeHtml(loader.channel)}` : ''}${loader.recommended || index === 0 ? ' - preferred' : ''}${loader.installed ? ` · ${escapeHtml(t('ver.installed'))}` : ''}</span>
     `;
     button.onclick = () => selectLoader(loader.id);
     drawer.appendChild(button);
@@ -1038,8 +1082,11 @@ async function renderInlineLoaderList() {
   const loaders = await availableLoaders(activeVersion(), currentMode);
   loaders.forEach((loader) => {
     const button = document.createElement('button');
-    button.className = `inline-loader-chip${currentLoaderId() === loader.id ? ' active' : ''}`;
+    button.className = `inline-loader-chip${currentLoaderId() === loader.id ? ' active' : ''}${loader.installed ? ' installed' : ''}`;
     button.textContent = loader.label;
+    // Подписи в чипе нет места — «собрана» говорит наведение, а цвет чипа
+    // виден и без него.
+    button.title = loader.installed ? t('ver.installed') : t('ver.notInstalled');
     button.onclick = () => selectLoader(loader.id);
     host.appendChild(button);
   });
@@ -2944,5 +2991,7 @@ async function playMP3File(filename) {
 }
 
 function openMusicFolder() {
-  window.pulse?.openFolder();
+  // Именно папка музыки: раньше кнопка открывала игровую — рядом с треками
+  // игрок оказывался в mods/, и это выглядело поломкой.
+  window.pulse?.openFolder(cfg?.paths?.music);
 }

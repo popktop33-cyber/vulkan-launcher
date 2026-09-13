@@ -472,6 +472,15 @@ body.vanilla-mode .inline-loader-chip.active{border-color:rgba(83,216,111,.30);b
 .inline-loader-list{display:flex;gap:8px;flex-wrap:wrap}
 .inline-loader-chip{font-size:12px}
 
+/* ── Загрузчик собран ─────────────────────────────────────────────────────────
+   Отдельный признак от «выбран», как и у версий: загрузчик можно выбрать,
+   ещё не собрав. Зелёный тот же, что у скачанной версии, — это один и тот же
+   ответ «качать не придётся», только про разные папки. */
+.loader-option.installed,.inline-loader-chip.installed{
+  border-color:rgba(83,216,111,.22);background:rgba(83,216,111,.08)
+}
+.loader-option.installed span,.inline-loader-chip.installed{color:#8ff0a4}
+
 .version-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:22px}
 .summary-card{padding:14px 16px;border-radius:12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.05)}
 .summary-card strong{display:block;font-size:16px;color:#fff}

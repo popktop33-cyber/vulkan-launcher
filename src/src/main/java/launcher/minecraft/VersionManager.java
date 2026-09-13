@@ -66,6 +66,11 @@ public class VersionManager {
             byId.put(entry.id(), entry);
         }
 
+        // Сборки читаем одним обходом каталога, а не по разу на версию: список
+        // длинный, а на диске их единицы — семь десятков одинаковых обходов
+        // читали бы одни и те же файлы.
+        Map<String, List<Map<String, Object>>> loadersByVersion = LoaderStore.installedByVersion();
+
         List<Map<String, Object>> out = new ArrayList<>();
         for (String id : VersionCatalog.defaultVersionRange()) {
             VersionEntry entry = byId.get(id);
@@ -75,6 +80,7 @@ public class VersionManager {
             row.put("available", entry != null);
             row.put("installed", isInstalled(id));
             row.put("label", labelFor(id));
+            row.put("loaders", loadersByVersion.getOrDefault(id, List.of()));
             out.add(row);
         }
         return out;

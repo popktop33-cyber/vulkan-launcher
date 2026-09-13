@@ -13,10 +13,15 @@ import java.nio.file.Path;
  * Directory structure:
  *   %APPDATA%/pulsePLUS/              — dataDir()
  *     config.json
- *     minecraft/                      — minecraftGameDir()  (pulse profile)
- *       mods/                         — modsDir("pulse")
- *     vanilla/                        — vanillaGameDir()    (vanilla profile)
- *       mods/                         — modsDir("vanilla")
+ *     instances/                      — instancesDir()  папка на каждую сборку
+ *       fabric-loader-0.19.5-1.21.1/  — gameDir("vanilla")
+ *         mods/                       — modsDir("1.21.1", "vanilla")
+ *         saves/ config/ options.txt  — всё, что игра пишет в --gameDir
+ *       1.20.1-forge-47.4.0/          — вторая сборка, своя и независимая
+ *     minecraft/ vanilla/             — старые папки профилей; после переноса
+ *                                       в них остаются только общие корни
+ *                                       (assets, libraries, versions) —
+ *                                       оттуда берутся уже скачанные файлы
  *     downloaded-mods/                — downloadedModsDir()
  *     music/                          — musicDir()
  *     videos/                         — videosDir()        (background videos)
@@ -77,32 +82,131 @@ public class LauncherConfig {
         return dataDir().resolve("game");
     }
 
-    // ── Profile game directories ────────────────────────────────────────────
+    // ── Per-instance game directories ───────────────────────────────────────
+    //
+    // У каждой сборки «версия + загрузчик» своя папка в instances/ — как в Prism
+    // или MultiMC. Туда игра пишет всё, что попадает в --gameDir: mods, saves,
+    // config, options.txt, servers.dat, resourcepacks, screenshots. Сборки друг
+    // о друге не знают: миров и настроек у них порознь.
+    //
+    // Общими остаются только versions/, libraries/ и assets/ из game(). Клиент,
+    // библиотеки и ресурсы адресуются хешем и для всех сборок одинаковы —
+    // копия на каждую стоила бы гигабайтов на ровном месте.
+    //
+    // Имя папки намеренно совпадает с именем папки версии на диске
+    // (fabric-loader-0.19.5-1.21.1, 1.20.1-forge-47.4.0, neoforge-21.1.235):
+    // сборка называется одинаково и в списке версий, и в проводнике.
+
+    /** Корень всех сборок: %APPDATA%/pulsePLUS/instances */
+    public static Path instancesDir() {
+        return dataDir().resolve("instances");
+    }
+
+    /** Версия игры, выбранная сейчас в профиле ("pulse" или "vanilla"). */
+    public static String versionFor(String mode) {
+        LauncherConfig c = get();
+        return "vanilla".equalsIgnoreCase(mode) ? c.vanillaVersion : c.selectedVersion;
+    }
+
+    /** Загрузчик, выбранный сейчас в профиле ("pulse" или "vanilla"). */
+    public static String loaderIdFor(String mode) {
+        LauncherConfig c = get();
+        return "vanilla".equalsIgnoreCase(mode) ? c.vanillaLoaderId : c.pulseLoaderId;
+    }
+
+    /**
+     * Имя папки сборки по версии игры и идентификатору загрузчика.
+     *
+     * Повторяет то, как зовёт свои папки сам загрузчик: установщик Forge заводит
+     * {@code 1.20.1-forge-47.4.0}, NeoForge — {@code neoforge-21.1.235}, а Fabric
+     * мы ставим своим кодом и зовём {@code fabric-loader-<сборка>-<версия>}.
+     * Одна и та же строка получается и у папки сборки, и у папки версии — так
+     * их можно сверять глазами, не держа таблицу соответствий в голове.
+     *
+     * Сборка неопознанного семейства тоже получит папку: имя чистится до
+     * допустимого в Windows, лишь бы сборка не потерялась молча.
+     */
+    public static String instanceName(String mcVersion, String loaderId) {
+        String family = loaderFamily(loaderId);
+        String build  = loaderBuild(loaderId);
+        String ver    = mcVersion == null || mcVersion.isBlank() ? versionFromLoaderId(loaderId) : mcVersion.trim();
+        if (ver.isBlank()) ver = "1.21.4";
+
+        // Ванилла — это просто версия; загрузчик без сборки тоже ничего не добавляет
+        if (family.isBlank() || "vanilla".equals(family) || build.isBlank()) return safeName(ver);
+
+        switch (family) {
+            case "fabric":
+            case "quilt":    return safeName(family + "-loader-" + build + "-" + ver);
+            case "forge":    return safeName(ver + "-forge-" + build);
+            case "neoforge": return safeName("neoforge-" + build);
+            default:         return safeName(family + "-" + build + "-" + ver);
+        }
+    }
+
+    /** Папка сборки: %APPDATA%/pulsePLUS/instances/<имя> */
+    public static Path instanceDir(String mcVersion, String loaderId) {
+        return instancesDir().resolve(instanceName(mcVersion, loaderId));
+    }
+
+    /** Папка сборки, выбранной сейчас в этом профиле. */
+    public static Path gameDir(String mode) {
+        return instanceDir(versionFor(mode), loaderIdFor(mode));
+    }
 
     /** Minecraft game dir for the pulse (modded) profile */
     public static Path minecraftGameDir() {
-        return dataDir().resolve("minecraft");
+        return gameDir("pulse");
     }
 
     /** Minecraft game dir for the vanilla profile */
     public static Path vanillaGameDir() {
-        return dataDir().resolve("vanilla");
+        return gameDir("vanilla");
     }
 
-    /** Game dir for the given profile mode ("pulse" or "vanilla") */
-    public static Path gameDir(String mode) {
-        return "vanilla".equalsIgnoreCase(mode) ? vanillaGameDir() : minecraftGameDir();
+    // ── Разбор идентификатора загрузчика ────────────────────────────────────
+    // Формат: "<семейство>:<сборка>@<версия игры>", например fabric:0.19.5@1.21.1.
+    // У ваниллы сборки нет вовсе: vanilla:1.21.1.
+
+    private static String loaderFamily(String loaderId) {
+        if (loaderId == null) return "";
+        int c = loaderId.indexOf(':');
+        return (c > 0 ? loaderId.substring(0, c) : loaderId).trim().toLowerCase();
+    }
+
+    private static String loaderBuild(String loaderId) {
+        if (loaderId == null) return "";
+        int c = loaderId.indexOf(':');
+        if (c < 0) return "";
+        String rest = loaderId.substring(c + 1);
+        int at = rest.indexOf('@');
+        return (at >= 0 ? rest.substring(0, at) : rest).trim();
+    }
+
+    private static String versionFromLoaderId(String loaderId) {
+        if (loaderId == null) return "";
+        int at = loaderId.indexOf('@');
+        return at >= 0 ? loaderId.substring(at + 1).trim() : "";
+    }
+
+    /** Имя папки: только то, что Windows примет без вопросов. */
+    static String safeName(String raw) {
+        String s = raw.trim().replaceAll("[^A-Za-z0-9._-]+", "-").replaceAll("^-+|-+$", "");
+        return s.isEmpty() ? "instance" : s;
     }
 
     // ── Mods directories ────────────────────────────────────────────────────
 
     /**
      * Mods directory for a specific profile mode.
-     * pulse  → %APPDATA%/pulsePLUS/minecraft/mods
-     * vanilla → %APPDATA%/pulsePLUS/vanilla/mods
+     * pulse  → instances/<сборка pulse>/mods
+     * vanilla → instances/<сборка vanilla>/mods
+     *
+     * Загрузчик берётся из профиля, версия — из аргумента: список модов всегда
+     * относится к той сборке, что выбрана в этом профиле сейчас.
      */
     public static Path modsDir(String mcVersion, String mode) {
-        return gameDir(mode).resolve("mods");
+        return instanceDir(mcVersion, loaderIdFor(mode)).resolve("mods");
     }
 
     /** Mods directory for the pulse profile (legacy overload) */
@@ -122,7 +226,7 @@ public class LauncherConfig {
 
     /** Disabled mods for a specific profile mode and version */
     public static Path disabledModsDir(String mcVersion, String mode) {
-        return gameDir(mode).resolve("disabled-mods").resolve(mcVersion);
+        return instanceDir(mcVersion, loaderIdFor(mode)).resolve("disabled-mods").resolve(mcVersion);
     }
 
     // ── Versions directories ────────────────────────────────────────────────
