@@ -8,6 +8,8 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
@@ -15,6 +17,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import launcher.LauncherConfig;
 import launcher.VersionCatalog;
 
 public class VersionManager {
@@ -57,23 +60,49 @@ public class VersionManager {
         return POPULAR;
     }
 
-    public static List<Map<String, String>> getCatalogVersions() throws Exception {
+    public static List<Map<String, Object>> getCatalogVersions() throws Exception {
         Map<String, VersionEntry> byId = new LinkedHashMap<>();
         for (VersionEntry entry : getVersions(false)) {
             byId.put(entry.id(), entry);
         }
 
-        List<Map<String, String>> out = new ArrayList<>();
+        List<Map<String, Object>> out = new ArrayList<>();
         for (String id : VersionCatalog.defaultVersionRange()) {
             VersionEntry entry = byId.get(id);
-            Map<String, String> row = new LinkedHashMap<>();
+            Map<String, Object> row = new LinkedHashMap<>();
             row.put("id", id);
             row.put("type", entry != null ? entry.type() : "release");
-            row.put("available", String.valueOf(entry != null));
+            row.put("available", entry != null);
+            row.put("installed", isInstalled(id));
             row.put("label", labelFor(id));
             out.add(row);
         }
         return out;
+    }
+
+    /**
+     * Скачана ли версия целиком.
+     *
+     * Признак — описание и клиент на диске. Библиотеки и ресурсы сюда не входят:
+     * они общие для всех версий и лежат отдельно от них, так что спрашивать про
+     * них у каждой версии было бы неправдой. Именно этот признак подсвечивается
+     * в списке, чтобы было видно, что уже не придётся качать.
+     */
+    public static boolean isInstalled(String id) {
+        Path dir = LauncherConfig.tlVersionsDir().resolve(id);
+        Path json = dir.resolve(id + ".json");
+        if (!Files.isRegularFile(json)) return false;
+        try {
+            JsonObject meta = GSON.fromJson(Files.readString(json), JsonObject.class);
+            // У части версий клиент лежит под другим именем — это поле "jar"
+            String jar = meta != null && meta.has("jar") ? meta.get("jar").getAsString() : id;
+            Path jarPath = jar.equals(id)
+                ? dir.resolve(id + ".jar")
+                : LauncherConfig.tlVersionsDir().resolve(jar).resolve(jar + ".jar");
+            return Files.isRegularFile(jarPath);
+        } catch (Exception e) {
+            return Files.isRegularFile(dir.resolve(id + ".jar"));
+        }
     }
 
     public static String getVersionUrl(String version) throws Exception {

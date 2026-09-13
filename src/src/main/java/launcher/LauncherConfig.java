@@ -21,7 +21,11 @@ import java.nio.file.Path;
  *     music/                          — musicDir()
  *     videos/                         — videosDir()        (background videos)
  *     logs/                           — logsDir()
- *     cache/                          — local cache (libs, assets)
+ *     cache/                          — служебный кэш лаунчера (НЕ файлы игры)
+ *     game/                           — tlGameDir()  общий каталог игры
+ *       versions/                     — версии: описание и клиент
+ *       libraries/                    — библиотеки
+ *       assets/                       — ресурсы
  *
  *   %APPDATA%/.tlauncher/legacy/Minecraft/game/
  *     versions/                       — tlVersionsDir()     (shared TLauncher versions)
@@ -137,7 +141,31 @@ public class LauncherConfig {
         return tlGameDir().resolve("libraries");
     }
 
-    /** Local launcher cache root (libraries, assets) */
+    /**
+     * Shared assets directory: %APPDATA%/pulsePLUS/game/assets
+     *
+     * Ресурсы и библиотеки лежат рядом с версиями, а не в отдельном cache/.
+     * Так вышло не для красоты: раньше и то и другое складывалось в
+     * %APPDATA%/pulsePLUS/cache, а оболочка лаунчера держит профиль Chromium
+     * в %APPDATA%/pulsePLUS. Windows не различает регистр, поэтому «cache»
+     * и хромовский «Cache» — одна и та же папка, и clearCache() при каждом
+     * запуске стирал скачанные библиотеки вместе с ресурсами. Игра качала
+     * их заново после каждого перезапуска.
+     *
+     * Теперь общий каталог игры один и тот же для всех профилей и версий —
+     * как в обычном .minecraft.
+     */
+    public static Path assetsDir() {
+        return tlGameDir().resolve("assets");
+    }
+
+    /**
+     * Место для служебного кэша лаунчера (не для файлов игры).
+     *
+     * ВНИМАНИЕ: сюда нельзя класть ничего, что жалко потерять. Имя совпадает
+     * с хромовским Cache в каталоге данных, а его чистит clearCache() при
+     * старте окна. Файлы самой игры живут в tlGameDir() — см. assetsDir().
+     */
     public static Path cacheDir() {
         return dataDir().resolve("cache");
     }

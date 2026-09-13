@@ -50,6 +50,10 @@
       'sidebar.accounts': 'Управление аккаунтами',
       'sidebar.vanilla.profile': 'Профиль',
       'sidebar.vanilla.fixed': 'Фиксированная сборка',
+      // Состояние версии в списке. Скачана — значит лежит на диске целиком,
+      // и при запуске её качать уже не придётся.
+      'ver.installed': 'скачана',
+      'ver.notInstalled': 'не скачана, будет загружена при запуске',
 
       // ── Главная страница ───────────────────────────────────────────────────
       'hero.ready': 'Готов к запуску',
@@ -310,6 +314,8 @@
       'sidebar.accounts': 'Manage accounts',
       'sidebar.vanilla.profile': 'Profile',
       'sidebar.vanilla.fixed': 'Locked build',
+      'ver.installed': 'downloaded',
+      'ver.notInstalled': 'not downloaded yet, will be fetched on launch',
 
       'hero.ready': 'Ready to play',
       'hero.title.pulse': 'Ready to play.',

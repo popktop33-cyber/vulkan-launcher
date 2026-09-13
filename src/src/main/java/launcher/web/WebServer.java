@@ -677,6 +677,11 @@ public class WebServer {
     }
 
     private void sendJson(HttpExchange ex, int code, Object data) throws IOException {
+        // Ответы API — это живое состояние, а не документ. Список версий обязан
+        // показывать свежую скачанность сразу после загрузки, поэтому кэшировать
+        // его нельзя: иначе браузер отдаст вчерашнюю копию и лаунчер соврёт
+        // игроку, что версия не скачана.
+        ex.getResponseHeaders().set("Cache-Control", "no-store");
         send(ex, code, "application/json", GSON.toJson(data));
     }
 

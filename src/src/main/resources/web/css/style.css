@@ -191,14 +191,45 @@ body.vanilla-mode #pulseLockCard{display:none}
 .versions-list::-webkit-scrollbar{width:6px;height:6px}
 .version-item{
   padding:10px 12px;border-radius:12px;border:1px solid transparent;background:rgba(255,255,255,.04);
-  display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:.16s;color:#f1f4ff
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  cursor:pointer;transition:.16s;color:#f1f4ff;
+  /* Кнопка по умолчанию центрирует текст — в строке версии он должен
+     прижиматься влево, как и всё остальное в колонке. */
+  text-align:left
 }
 .version-item:hover{border-color:rgba(125,92,255,.24);transform:translateX(2px)}
-.version-item.active{background:rgba(125,92,255,.16);border-color:rgba(125,92,255,.30)}
-body.vanilla-mode .version-item.active{background:rgba(83,216,111,.14);border-color:rgba(83,216,111,.28)}
+
+/* ── Скачана ──────────────────────────────────────────────────────────────────
+   Отдельное состояние от «выбрана»: версию можно выбрать, ещё не скачав её,
+   и наоборот. Поэтому это не одно поле, а два независимых признака, и на
+   экране они выглядят по-разному — зелёная подложка против заливки режимом. */
+.version-item.installed{background:rgba(83,216,111,.09);border-color:rgba(83,216,111,.22)}
+.version-item.installed .ver-state{color:#8ff0a4}
+
+/* ── Выбрана ──────────────────────────────────────────────────────────────────
+   Идёт после «скачана», чтобы перебивать её там, где совпали. Кроме заливки
+   даём сплошную полосу слева: в ванильном режиме и подсветка, и цвет
+   скачанности зелёные, и без полосы их было бы не различить. */
+.version-item.active{background:rgba(125,92,255,.16);border-color:rgba(125,92,255,.30);box-shadow:inset 3px 0 0 #7d5cff}
+body.vanilla-mode .version-item.active{background:rgba(83,216,111,.14);border-color:rgba(83,216,111,.28);box-shadow:inset 3px 0 0 var(--green)}
+
+/* min-width:0 обязателен: без него длинное имя распирает строку и обрезать
+   его многоточием не выходит — flex не даёт элементу стать уже содержимого. */
+.version-item .ver-text{min-width:0}
 .version-item .ver-main{font-size:13px;font-weight:700;color:#fff}
-.version-item .ver-loader{font-size:10px;color:#d2d8f5}
-.version-item .ver-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.version-item .ver-loader{font-size:10px;color:#d2d8f5;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.version-item .ver-state{font-weight:700}
+
+/* Точка говорит то же, что и подложка, но заметна при беглом взгляде по
+   списку. Раньше она была зелёной у всех подряд и потому не значила ничего. */
+.version-item .ver-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;
+  background:transparent;border:1px solid rgba(255,255,255,.22)
+}
+.version-item.installed .ver-dot{
+  background:var(--green);border-color:transparent;
+  box-shadow:0 0 0 3px rgba(83,216,111,.16)
+}
 
 .account-bar{
   margin-top:14px;padding-top:14px;border-top:1px solid rgba(130,111,255,.18);display:flex;align-items:center;gap:10px

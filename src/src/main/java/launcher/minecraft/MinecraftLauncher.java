@@ -42,10 +42,14 @@ public class MinecraftLauncher {
         /*
          * Everything lives inside the launcher's own data dir — self-contained:
          *   %APPDATA%/pulsePLUS/game/versions/<ver>/<ver>.json|jar
-         *   %APPDATA%/pulsePLUS/cache/{libraries,assets}
+         *   %APPDATA%/pulsePLUS/game/{libraries,assets}
+         *
+         * Именно game/, а не cache/: у оболочки лаунчера там же лежит профиль
+         * Chromium, а его Cache она чистит при каждом старте окна. Windows не
+         * различает регистр — «cache» и «Cache» одна папка, и скачанное
+         * пропадало после каждого перезапуска.
          */
         Path tlVersionsDir = LauncherConfig.tlVersionsDir();
-        Path cacheRoot     = LauncherConfig.cacheDir();
 
         // ── 1. Fetch Minecraft version JSON (into TLauncher versions folder) ─
         LaunchProgress.update("version", 4, "Получение версии " + mcVersion + "...");
@@ -73,7 +77,7 @@ public class MinecraftLauncher {
 
         // ── 3. Download ALL libraries (both types) ──────────────────────────
         LaunchProgress.update("libraries", 12, "Загрузка библиотек...");
-        Path libsDir = cacheRoot.resolve("libraries");
+        Path libsDir = LauncherConfig.librariesDir();
         List<Path> classpath = new ArrayList<>();
         downloadAllLibraries(meta.getAsJsonArray("libraries"), libsDir, classpath);
 
@@ -104,7 +108,7 @@ public class MinecraftLauncher {
         extractNatives(classpath, nativesDir);
 
         // ── 6. Download assets ──────────────────────────────────────────────
-        Path assetsDir = cacheRoot.resolve("assets");
+        Path assetsDir = LauncherConfig.assetsDir();
         String assetIndexId = meta.getAsJsonObject("assetIndex").get("id").getAsString();
         String assetIndexUrl = meta.getAsJsonObject("assetIndex").get("url").getAsString();
         downloadAllAssets(assetIndexUrl, assetIndexId, assetsDir);
@@ -205,7 +209,7 @@ public class MinecraftLauncher {
         // All storage lives inside the launcher's own data dir — self-contained.
         Path tlVersionsDir = LauncherConfig.tlVersionsDir();
         Path libsDir       = LauncherConfig.librariesDir();
-        Path assetsDir     = LauncherConfig.cacheDir().resolve("assets");
+        Path assetsDir     = LauncherConfig.assetsDir();
         String build = parseFabricBuild(loaderId);   // "forge:47.4.20@1.20.1" → "47.4.20"
 
         // 1. Find the loader version JSON we produced earlier; install it if missing.
@@ -476,6 +480,9 @@ public class MinecraftLauncher {
         // MISSING ones in parallel.
         record Lib(Path dest, String url, boolean isNative) {}
         List<Lib> missing = new ArrayList<>();
+        // Библиотеки от прежних раскладок: их тоже не надо качать заново
+        List<Path> legacyLibs = legacyLibraryRoots();
+        int adoptedLibs = 0;
 
         for (JsonElement el : libs) {
             JsonObject lib = el.getAsJsonObject();
@@ -513,7 +520,11 @@ public class MinecraftLauncher {
             boolean downloadOnly = lib.has("downloadOnly") && lib.get("downloadOnly").getAsBoolean();
 
             if (!Files.exists(dest)) {
-                if (downloadUrl != null && !downloadUrl.isBlank()) {
+                // Раньше библиотека могла лежать в каталоге другой раскладки —
+                // переносим её оттуда, а не тянем из сети
+                if (adoptFile(dest, relPath, legacyLibs)) {
+                    adoptedLibs++;
+                } else if (downloadUrl != null && !downloadUrl.isBlank()) {
                     missing.add(new Lib(dest, downloadUrl, isNative));
                 } else {
                     // No URL and not on disk — the loader installer should have produced
@@ -524,6 +535,9 @@ public class MinecraftLauncher {
             if (!isNative && !downloadOnly) classpath.add(dest);
         }
 
+        if (adoptedLibs > 0) {
+            System.out.println("[pulsePLUS] Libraries: перенесено из старого кэша " + adoptedLibs);
+        }
         if (missing.isEmpty()) {
             LaunchProgress.update("libraries", 40, "Библиотеки уже загружены");
             return;
@@ -686,26 +700,107 @@ public class MinecraftLauncher {
 
     // ── Asset downloading ───────────────────────────────────────────────────
 
+    /**
+     * Перенести уже скачанный файл из старого каталога.
+     *
+     * relPath — путь внутри каталога-источника; он одинаков во всех схемах,
+     * потому что и библиотеки, и ресурсы раскладываются по своему обычному
+     * виду (maven-координата и хеш соответственно). Оригинал не трогаем:
+     * связываем жёсткой связью, а если она не выйдет — копируем.
+     *
+     * @return true, если файл удалось перенести
+     */
+    private static boolean adoptFile(Path dest, String relPath, List<Path> roots) {
+        // Готовое не трогаем. Files.copy молча перезаписывает существующую цель
+        // (проверено: вопреки документации исключения не бросает), а подменять
+        // уже скачанный файл нельзя — поэтому выход здесь, а не надежда на то,
+        // что вызывающий сам проверил наличие.
+        if (Files.exists(dest)) return Files.isRegularFile(dest);
+        for (Path root : roots) {
+            Path src = root.resolve(relPath);
+            if (!Files.isRegularFile(src)) continue;
+            try {
+                Files.createDirectories(dest.getParent());
+                try {
+                    Files.createLink(dest, src);   // тот же том — связь бесплатна
+                } catch (Exception noLink) {
+                    try {
+                        Files.copy(src, dest);     // другой том или ФС без связей
+                    } catch (Exception copyFailed) {
+                        // Обрыв копии оставил бы обрезанный файл, а он на вид
+                        // ничем не отличается от целого: следующая загрузка
+                        // приняла бы его за готовый и не перекачала. Убираем.
+                        try { Files.deleteIfExists(dest); } catch (Exception ignored) { }
+                        throw copyFailed;
+                    }
+                }
+                return true;
+            } catch (Exception ignored) {
+                // не вышло с этим каталогом — пробуем следующий
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Каталоги, куда лаунчер складывал ресурсы раньше.
+     *
+     * Объекты ресурсов названы своим хешем от содержимого и потому одинаковы
+     * для всех версий игры сразу — в этих папках лежит больше полугигабайта
+     * уже скачанного, и качать то же самое заново незачем.
+     */
+    private static List<Path> legacyAssetRoots() {
+        Path data = LauncherConfig.dataDir();
+        return existingDirs(List.of(
+            data.resolve("cache").resolve("assets"),      // прошлый общий кэш
+            data.resolve("vanilla").resolve("assets"),    // кэши по профилям
+            data.resolve("minecraft").resolve("assets")));
+    }
+
+    /** Каталоги с библиотеками от прежних раскладок. */
+    private static List<Path> legacyLibraryRoots() {
+        Path data = LauncherConfig.dataDir();
+        return existingDirs(List.of(
+            data.resolve("cache").resolve("libraries"),
+            data.resolve("vanilla").resolve("libraries"),
+            data.resolve("minecraft").resolve("libraries")));
+    }
+
+    private static List<Path> existingDirs(List<Path> candidates) {
+        List<Path> out = new ArrayList<>();
+        for (Path p : candidates) if (Files.isDirectory(p)) out.add(p);
+        return out;
+    }
+
     private static void downloadAllAssets(String indexUrl, String indexId, Path assetsDir) throws Exception {
         Path indexPath = assetsDir.resolve("indexes").resolve(indexId + ".json");
         if (!Files.exists(indexPath)) {
-            Files.createDirectories(indexPath.getParent());
-            System.out.println("[pulsePLUS] Downloading asset index " + indexId + "...");
-            download(indexUrl, indexPath);
+            // Указатель на набор ресурсов тоже мог остаться в старом каталоге
+            if (!adoptFile(indexPath, "indexes/" + indexId + ".json", legacyAssetRoots())) {
+                Files.createDirectories(indexPath.getParent());
+                System.out.println("[pulsePLUS] Downloading asset index " + indexId + "...");
+                download(indexUrl, indexPath);
+            }
         }
         JsonObject index = GSON.fromJson(Files.readString(indexPath), JsonObject.class);
         JsonObject objects = index.getAsJsonObject("objects");
         int total = objects.size();
 
         // Collect only the assets that are still missing
+        List<Path> legacy = legacyAssetRoots();
         List<String[]> missing = new ArrayList<>(); // [hash, prefix, key]
         int skipped = 0;
+        int adopted = 0;
         for (Map.Entry<String, JsonElement> entry : objects.entrySet()) {
             String hash = entry.getValue().getAsJsonObject().get("hash").getAsString();
             String prefix = hash.substring(0, 2);
             Path dest = assetsDir.resolve("objects").resolve(prefix).resolve(hash);
-            if (Files.exists(dest)) skipped++;
-            else missing.add(new String[]{hash, prefix, entry.getKey()});
+            if (Files.exists(dest)) { skipped++; continue; }
+            if (adoptFile(dest, "objects/" + prefix + "/" + hash, legacy)) { adopted++; continue; }
+            missing.add(new String[]{hash, prefix, entry.getKey()});
+        }
+        if (adopted > 0) {
+            System.out.println("[pulsePLUS] Assets: перенесено из старого кэша " + adopted);
         }
         System.out.println("[pulsePLUS] Assets: " + skipped + " cached, downloading " + missing.size() + " of " + total + "...");
 

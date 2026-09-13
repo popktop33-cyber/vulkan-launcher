@@ -194,6 +194,17 @@ window.addEventListener('DOMContentLoaded', async () => {
   setupCursorBlur();
   setStaticLogo();
 
+  // Язык переключается на лету, но статическая разметка с data-i18n — это
+  // только часть интерфейса: подписи в списках собираются в JS и после смены
+  // языка оставались на прежнем (например, «скачана» у версии). Рисуем их
+  // заново — отрисовщики берут текст через t() и подхватят новый язык.
+  I18N.onChange(() => {
+    renderVersionList();
+    renderAccounts();
+    renderMods();
+    renderMP3List();
+  });
+
   // Свёрнутое окно не должно декодировать видео и считать волну: Electron у нас
   // с отключённым троттлингом фона, сам он это не остановит
   document.addEventListener('visibilitychange', () => {
@@ -843,13 +854,26 @@ function renderVersionList() {
   list.innerHTML = '';
   const currentVersion = activeVersion();
   versions.forEach((version) => {
+    /* Выбрана и скачана — два разных состояния, и они складываются: версию
+       можно выбрать, ещё не скачав, и наоборот. Поэтому два независимых
+       класса, а не один. Если бэкенд про скачанность не сказал (старый jar
+       или предпросмотр без сервера) — считаем, что не скачана, и не врём
+       игроку зелёным. */
+    const selected = currentVersion === version.id;
+    const installed = version.installed === true;
     const row = document.createElement('button');
-    row.className = `version-item${currentVersion === version.id ? ' active' : ''}`;
+    row.className = 'version-item'
+      + (installed ? ' installed' : '')
+      + (selected ? ' active' : '');
+    row.dataset.version = version.id;
+    row.title = installed ? t('ver.installed') : t('ver.notInstalled');
     row.onclick = () => syncSelectedVersion(version.id, true);
     row.innerHTML = `
-      <div>
+      <div class="ver-text">
         <div class="ver-main">${escapeHtml(version.id)}</div>
-        <div class="ver-loader">${escapeHtml(activeLoader().family)}</div>
+        <div class="ver-loader">${escapeHtml(activeLoader().family)}${
+          installed ? `<span class="ver-state"> · ${escapeHtml(t('ver.installed'))}</span>` : ''
+        }</div>
       </div>
       <span class="ver-dot"></span>
     `;
@@ -950,6 +974,11 @@ function defaultLoaderFor(versionId, mode, loaders) {
 async function syncSelectedVersion(versionId, save) {
   if (currentMode !== 'vanilla') return;
   cfg.vanillaVersion = versionId;
+  // Рисуем сразу: подсветка выбора обязана отзываться на клик мгновенно,
+  // а не после похода в сеть за списком загрузчиков. Ниже список
+  // перерисовывается ещё раз — уже с настоящим именем загрузчика,
+  // которое до ответа сервера неизвестно.
+  renderVersionList();
   const loaders = await availableLoaders(versionId, 'vanilla');
   cfg.vanillaLoaderId = defaultLoaderFor(versionId, 'vanilla', loaders);
   renderVersionList();
@@ -1287,6 +1316,11 @@ async function launchGame() {
   } finally {
     pollingDone = true;
     if (launchBtn) launchBtn.disabled = false;
+    /* Версия к этому моменту уже лежит на диске — и когда игра запустилась,
+       и когда сорвалась на середине. Перечитываем список, чтобы она перестала
+       значиться как «не скачана»: пометка должна отвечать тому, что на диске,
+       а не тому, что было при открытии окна. */
+    loadVersions();
   }
 }
 
