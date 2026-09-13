@@ -29,6 +29,28 @@
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
+
+/* ── Полосы прокрутки ────────────────────────────────────────────────────────
+   Одно правило на весь интерфейс.
+
+   До этого стили полос были прописаны по отдельным блокам и задавали только
+   width. Этого мало по двум причинам. Во-первых, у полосы есть ещё и высота —
+   толщина горизонтальной; не тронув её, мы оставляли горизонтальную полосу
+   нативной, светлой, и она вылезала снизу панели. Во-вторых, панель описания
+   мода (.mod-detail) своих правил не имела вовсе, а прокручивается именно она:
+   замерено — 400 px по внешнему краю и 384 по внутреннему, то есть 15 px
+   занимала системная полоса Windows.
+
+   height задаём наравне с width: без него любая горизонтальная полоса снова
+   станет системной. */
+*::-webkit-scrollbar{width:8px;height:8px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:rgba(125,92,255,.28);border-radius:999px}
+*::-webkit-scrollbar-thumb:hover{background:rgba(125,92,255,.46)}
+/* Уголок, где сходятся обе полосы: без него там остаётся светлый квадрат */
+*::-webkit-scrollbar-corner{background:transparent}
+body.vanilla-mode *::-webkit-scrollbar-thumb{background:rgba(83,216,111,.30)}
+body.vanilla-mode *::-webkit-scrollbar-thumb:hover{background:rgba(83,216,111,.48)}
 html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:"Segoe UI",system-ui,sans-serif}
 body{position:relative}
 button,input,select{font:inherit}
@@ -159,9 +181,14 @@ body.vanilla-mode #pulseLockCard{display:none}
 .scr-word,.t-word{display:inline-block;white-space:nowrap;max-width:100%}
 
 .section-label{font-size:11px;font-weight:800;letter-spacing:.12em;color:#c7b8ff;text-transform:uppercase}
-.versions-list{display:grid;gap:7px;overflow:auto;padding-right:3px}
-.versions-list::-webkit-scrollbar{width:6px}
-.versions-list::-webkit-scrollbar-thumb{background:rgba(125,92,255,.40);border-radius:999px}
+/* overflow-x:hidden здесь обязателен. В записи «overflow:auto» вторая ось тоже
+   становится auto, и стоило строке версии хоть на пиксель превысить ширину
+   колонки, как снизу вылезала горизонтальная полоса. Строки версий вбок не
+   ходят никогда — им там нечего показывать.
+   scrollbar-gutter:stable держит место под вертикальную полосу всегда: иначе
+   она появляется вместе со списком и сдвигает его на свою ширину. */
+.versions-list{display:grid;gap:7px;overflow-y:auto;overflow-x:hidden;padding-right:3px;scrollbar-gutter:stable}
+.versions-list::-webkit-scrollbar{width:6px;height:6px}
 .version-item{
   padding:10px 12px;border-radius:12px;border:1px solid transparent;background:rgba(255,255,255,.04);
   display:flex;justify-content:space-between;align-items:center;cursor:pointer;transition:.16s;color:#f1f4ff
@@ -245,7 +272,8 @@ button.account-bar:hover .account-bar-chevron{transform:translateX(2px);color:#f
 
 .account-panel{
   position:fixed;top:var(--titlebar-h);right:0;bottom:0;z-index:41;
-  width:min(430px,92vw);padding:22px 22px 28px;overflow-y:auto;
+  width:min(430px,92vw);padding:22px 22px 28px;
+  overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;
   --panel-translate-x:30px;
   background:linear-gradient(180deg, rgba(20,17,32,.98), rgba(10,9,16,.99));
   border-left:1px solid rgba(125,92,255,.22);
@@ -356,11 +384,12 @@ body.vanilla-mode .mode-btn.active{
   border-color:rgba(83,216,111,.30)
 }
 
-.page{display:none;height:100%;padding:62px 34px 26px;overflow:auto}
+/* То же самое, что у списка версий: страница не прокручивается вбок, и место
+   под полосу забронировано заранее, чтобы содержимое не дёргалось вбок в тот
+   момент, когда страница стала длиннее экрана. */
+.page{display:none;height:100%;padding:62px 34px 26px;overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable}
 .page.active{display:block;animation:pageSwap .36s ease both}
-.page::-webkit-scrollbar{width:8px}
-.page::-webkit-scrollbar-thumb{background:rgba(125,92,255,.26);border-radius:999px}
-body.vanilla-mode .page::-webkit-scrollbar-thumb{background:rgba(83,216,111,.28)}
+.page::-webkit-scrollbar{width:8px;height:8px}
 
 .hero-card,.music-card,.mods-section,.settings-card{
   background:rgba(13,14,22,.48);border:1px solid var(--border);border-radius:var(--r-lg);backdrop-filter:blur(9px);
@@ -428,7 +457,7 @@ body.vanilla-mode .inline-loader-chip.active{border-color:rgba(83,216,111,.30);b
   margin-top:10px;height:0;overflow:hidden;background:rgba(8,9,14,.74);border-radius:9px;border:1px solid transparent;
   font:11px Consolas,monospace;color:#e3e7ff;transition:height .24s ease,padding .24s ease,border-color .24s ease
 }
-.logbox.open{height:150px;padding:10px 12px;border-color:rgba(125,92,255,.18);overflow:auto}
+.logbox.open{height:150px;padding:10px 12px;border-color:rgba(125,92,255,.18);overflow-y:auto;overflow-x:hidden}
 
 .music-card{margin-top:16px;max-width:820px;padding:18px 20px}
 .music-top{display:flex;justify-content:space-between;gap:10px;align-items:flex-start}
@@ -546,7 +575,13 @@ body.vanilla-mode .mod-row.active{border-color:rgba(83,216,111,.30);background:r
    без него и даже без разбора на буквы замер давал те же 33 мс. */
 .mod-detail{
   position:fixed;top:var(--titlebar-h);right:0;bottom:0;z-index:41;
-  width:min(400px,92vw);padding:22px 22px 28px;overflow-y:auto;
+  /* Прокручивается именно эта панель, а не .detail-desc внутри неё: описание
+     раскрывается целиком, и едет вся панель. Поэтому полосу надо было оформить
+     здесь — раньше правило стояло на .detail-desc, который сам не скроллится,
+     а панель показывала системную полосу Windows в 15 px.
+     overflow-x:hidden — по той же причине, что у списка версий. */
+  width:min(400px,92vw);padding:22px 22px 28px;
+  overflow-y:auto;overflow-x:hidden;scrollbar-gutter:stable;
   --panel-translate-x:30px;
   display:flex;flex-direction:column;gap:12px;
   border:0;border-left:1px solid rgba(125,92,255,.22);border-radius:0;
@@ -606,14 +641,19 @@ body.vanilla-mode .detail-link{color:#9bf5ac}
    устраивает обоих. */
 .detail-img{
   display:inline-block;vertical-align:middle;
-  width:auto;max-width:100%;height:auto;margin:6px 4px;
+  width:auto;max-width:calc(100% - 8px);height:auto;margin:6px 4px;
   border-radius:var(--r-sm);border:1px solid rgba(255,255,255,.07);
   background:rgba(255,255,255,.03);
   animation:detailImgIn .35s ease both
 }
-/* Строка только из картинок — центрируем: одиночный скриншот по центру
-   читается лучше, чем прижатый влево */
-.detail-media{text-align:center}
+/* Строка только из картинок. Внутри не бывает текста, только изображения и
+   бейджи-ссылки, поэтому раскладка здесь флексовая, а не строчная.
+   Так уходят сразу две напасти. Первая: поля в 4 px по бокам не входят в
+   max-width:100%, и картинка во всю ширину вылезала из панели ровно на 8 px.
+   Вторая: между строчными блоками браузер ставит пробел, и он тоже добавлял
+   ширины — теперь промежутками занимается gap. */
+.detail-media{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:8px}
+.detail-media .detail-img{margin:0;max-width:100%}
 @keyframes detailImgIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
 
 /* ── Иконка мода ──────────────────────────────────────────────────────────────
@@ -630,12 +670,11 @@ body.vanilla-mode .detail-link{color:#9bf5ac}
    сжимался ровно в ноль: строки в нём есть, кнопка есть, высота 0. Замерено —
    display:grid, высота 0 px. */
 .detail-versions{
-  display:none;gap:8px;max-height:320px;overflow-y:auto;padding-right:4px;
+  display:none;gap:8px;max-height:320px;overflow-y:auto;overflow-x:hidden;padding-right:4px;
   flex-shrink:0
 }
 .detail-versions[data-open="true"]{display:grid}
-.detail-versions::-webkit-scrollbar{width:6px}
-.detail-versions::-webkit-scrollbar-thumb{background:rgba(125,92,255,.35);border-radius:999px}
+.detail-versions::-webkit-scrollbar{width:6px;height:6px}
 
 .version-row{
   display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;
@@ -679,8 +718,6 @@ body.vanilla-mode .cat-chip.active{
 
 .source-switch{display:flex;gap:6px}
 .source-switch .mode-btn{padding:9px 14px;font-size:12px}
-.detail-desc::-webkit-scrollbar{width:6px}
-.detail-desc::-webkit-scrollbar-thumb{background:rgba(124,92,255,.35);border-radius:6px}
 .detail-actions{display:flex;gap:8px;flex-wrap:wrap}
 .detail-flags{display:flex;gap:8px;flex-wrap:wrap}
 #detailModrinthLink{font-size:12px;color:#8b9dff;text-decoration:none;align-self:flex-start}
@@ -1340,7 +1377,7 @@ html[data-perf="low"] .t-part{filter:none;--t-char-blur:0px}
   transition: background .18s ease, color .18s ease;
 }
 .close-btn:hover { background: rgba(239,106,106,.18); color: #ffb3b3; }
-.modal-body { padding: 18px 20px 22px; overflow-y: auto; }
+.modal-body { padding: 18px 20px 22px; overflow-y: auto; overflow-x: hidden; }
 .setting-row {
   display: flex;
   align-items: center;
@@ -1367,6 +1404,7 @@ html[data-perf="low"] .t-part{filter:none;--t-char-blur:0px}
 .music-files-list {
   max-height: 200px;
   overflow-y: auto;
+  overflow-x: hidden;
   margin-bottom: 10px;
   display: flex;
   flex-direction: column;
