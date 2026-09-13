@@ -1505,3 +1505,14 @@ body.vanilla-mode .tut-chip-dot { background: var(--green); }
 
 /* Смена языка: список языков в настройках */
 #langSelect { min-width: 140px; }
+
+/* Служебный атрибут hidden работает через правило браузера `[hidden]{display:none}`,
+   а любое своё `display` его перебивает. У уголка стоит display:flex — и он
+   оставался на экране даже после того, как обучение развернулось обратно:
+   состояние в DOM правильное, а видно уголок. Отсюда и «говорит, что ждёт»,
+   хотя всё уже продолжилось. */
+#tutChip[hidden],
+#tutCard[hidden],
+#tutSpot[hidden] {
+  display: none !important;
+}

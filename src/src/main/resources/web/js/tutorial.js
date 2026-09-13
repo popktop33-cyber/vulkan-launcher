@@ -52,13 +52,16 @@
         title: 'tut.s6.title', body: 'tut.s6.body' },
       { id: 's7', target: '#modCategories', ready: onTab('mods'),
         title: 'tut.s7.title', body: 'tut.s7.body' },
-      { id: 's8', target: '#browserModsList', ready: onTab('mods'),
-        title: 'tut.s8.title', body: 'tut.s8.body' },
-      { id: 's9', target: '#browserModsList', ready: onTab('mods'),
+      { id: 's8', target: '#browserModsList .browser-mod-row', ready: onTab('mods'),
+        title: 'tut.s8.title', body: 'tut.s8.body',
+        done: () => !!document.querySelector('.browser-mod-row button') },
+      /* Целей две: и каталог из интернета, и список установленных. Игрок волен
+         нажать любую строку — и та и другая открывают описание. */
+      { id: 's9', target: ['#browserModsList .browser-mod-row', '#modsList .mod-row'], ready: onTab('mods'),
         title: 'tut.s9.title', body: 'tut.s9.body',
         done: () => document.getElementById('modDetail') &&
                     document.getElementById('modDetail').dataset.open === 'true' },
-      { id: 's10', target: '#modsList', ready: onTab('mods'),
+      { id: 's10', target: '#modsList .mod-row', ready: onTab('mods'),
         title: 'tut.s10.title', body: 'tut.s10.body' },
       { id: 's11', target: '#modsSpeedUpBtn', ready: onTab('mods'),
         title: 'tut.s11.title', body: 'tut.s11.body' },
@@ -108,6 +111,7 @@
       this.resumeOffered = false;
       this.timer = 0;
       this.waitPhrase = 1;
+      this.revealed = null;  // к какой цели уже прокручивали
       this.phase = 'idle';   // idle | intro | steps | finish | done
       /* Подпись того, что сейчас нарисовано в окошке. Пока она не менялась,
          окошко не пересобираем: кнопки, пересоздаваемые каждые двести
@@ -258,6 +262,7 @@
       this.index++;
       this.resumeOffered = false;
       this.drawn = null;
+      this.revealed = null;
       this.disarmTarget();
       const next = this.current;
       // Основной круг кончился — предлагаем дополнительное
@@ -360,10 +365,50 @@
       this.armedHandler = null;
     }
 
+    /* У шага может быть несколько равнозначных целей. Берём первую, которая
+       есть и видна: список модов из интернета и список установленных лежат в
+       разных местах страницы, и угадывать, куда смотрит игрок, не нужно. */
+    pickTarget(step) {
+      const list = Array.isArray(step.target) ? step.target : [step.target];
+      let firstExisting = null;
+      for (const sel of list) {
+        const el = document.querySelector(sel);
+        if (!el) continue;
+        if (!firstExisting) firstExisting = el;
+        const r = el.getBoundingClientRect();
+        if (r.width >= 2 && r.height >= 2) return el;
+      }
+      return firstExisting;
+    }
+
+    /* Прокрутить к цели, если она уехала за край. Делаем это один раз на шаг:
+       иначе плавная прокрутка дралась бы с собственной прокруткой игрока. */
+    revealTarget(step, target) {
+      if (this.revealed === step.id) return;
+      const r = target.getBoundingClientRect();
+      const fits = r.top >= 60 && r.bottom <= window.innerHeight - 20;
+      if (fits) { this.revealed = step.id; return; }
+      this.revealed = step.id;
+      try {
+        target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      } catch (_) {
+        target.scrollIntoView();   // старые движки без опций
+      }
+    }
+
     renderStep(step) {
-      const target = document.querySelector(step.target);
-      // Цели нет вовсе — такой шаг показывать не на чем, пропускаем сразу
-      if (!target) { this.advance(); return; }
+      const target = this.pickTarget(step);
+      /* Цели может не быть вовсе: список модов приходит из сети уже после
+         открытия вкладки. Пропустить шаг из-за этого — значит выкинуть его
+         молча, поэтому сначала ждём; пропускаем только если не дождались. */
+      if (!target) {
+        if (!this.hiddenSince) this.hiddenSince = Date.now();
+        if (Date.now() - this.hiddenSince < GRACE_MS) return;
+        this.hiddenSince = 0;
+        this.advance();
+        return;
+      }
+      this.revealTarget(step, target);
 
       /* Цель есть, но не видна. Часть кнопок помечена vanilla-only и в режиме
          чита просто не отображается — такую цель надо пропустить. Но элемент
