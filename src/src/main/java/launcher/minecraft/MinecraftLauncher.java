@@ -1027,6 +1027,16 @@ public class MinecraftLauncher {
             String exec = javaHome + File.separator + "bin" + File.separator + (win ? "javaw.exe" : "java");
             if (new File(exec).exists()) return exec;
         }
+        // Своя Java: сборка без Electron приносит рантайм рядом с собой.
+        // Без этой ветки игра ушла бы в «java» из PATH, а её там может не быть
+        // вовсе — те же Legacy Launcher и подобные носят Java внутри и в
+        // систему её не прописывают, так что «java» у игрока не находится.
+        String own = System.getProperty("java.home");
+        if (own != null && !own.isBlank()) {
+            boolean win = System.getProperty("os.name","").toLowerCase().contains("win");
+            String exec = own + File.separator + "bin" + File.separator + (win ? "javaw.exe" : "java");
+            if (new File(exec).exists()) return exec;
+        }
         return "java";
     }
 
