@@ -17,6 +17,11 @@ public class Session {
     public String accessToken = "0";
     public String xuid = "";
     public String userType = "legacy";
+    /**
+     * Аккаунт ely.by — игре к нему нужен javaagent authlib-injector, иначе скин
+     * не появится нигде: клиент уходит за текстурами на Mojang.
+     */
+    public boolean elyby = false;
 
     private static String cachedToken = "";
     private static long cachedExpiresAt = 0L;
@@ -34,6 +39,14 @@ public class Session {
 
         if (!account.isMicrosoft()) {
             session.name = account.name;
+            // Профиль ely.by: клиенту нужен ИХ UUID, иначе он не найдёт текстуры,
+            // а запуску — javaagent authlib-injector, иначе он пойдёт за ними на
+            // Mojang (см. AuthlibInjector). Профили, заведённые до этой правки,
+            // хранят офлайн-значение — чиним здесь, один раз.
+            if (account.isElyby()) {
+                AccountStore.get().ensureElybyUuid(account);
+                session.elyby = true;
+            }
             session.uuid = (account.uuid == null || account.uuid.isBlank())
                 ? AccountStore.offlineUuid(account.name)
                 : account.uuid;

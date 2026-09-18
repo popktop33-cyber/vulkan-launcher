@@ -28,6 +28,14 @@
      десятки, а не тысячи. */
   const WORD_LIMIT = 600;
 
+  /* Перевод строки, которые этот файл рисует сам. Словарь грузится раньше
+     (i18n.js идёт первым тегом), но обращаться к t() напрямую нельзя: без
+     словаря файл упал бы на ReferenceError. Тот же приём, что в skins.js. */
+  function tr(key, fallback) {
+    const value = typeof t === 'function' ? t(key) : null;
+    return value && value !== key ? value : fallback;
+  }
+
   /* Пропускаем только http и https. javascript:, data: и file: — мимо:
      первая выполнится при клике, вторая может нести произвольные данные. */
   function safeUrl(raw) {
@@ -194,7 +202,7 @@
   function renderInto(container, raw, format) {
     container.textContent = '';
     if (!raw || !raw.trim()) {
-      container.appendChild(document.createTextNode('Описание недоступно.'));
+      container.appendChild(document.createTextNode(tr('mods.noDescription', 'Описание недоступно.')));
       return container;
     }
 

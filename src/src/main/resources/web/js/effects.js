@@ -38,7 +38,7 @@ const FX = (() => {
   };
 
   function palette() {
-    return document.body.classList.contains('vanilla-mode') ? PALETTES.vanilla : PALETTES.pulse;
+    return document.body.classList.contains('theme-vanilla') ? PALETTES.vanilla : PALETTES.pulse;
   }
 
   // ── Волновое поле ─────────────────────────────────────────────────────────
@@ -993,12 +993,14 @@ const FX = (() => {
     let stripFx = null;
     let diorama = null;
     let dioramaCanvas = null;
+    let skinNick = null;   // ник мог прийти раньше, чем диорама догрузилась
+    let skinBust = 0;      // метка версии скина после сброса кэша на сервере
 
     let stripRetries = 0;
 
     function applyStripMode() {
       if (!stripHost) return;
-      const vanilla = document.body.classList.contains('vanilla-mode');
+      const vanilla = document.body.classList.contains('theme-vanilla');
       if (stripFx) stripFx.canvas.style.display = vanilla ? 'none' : 'block';
       if (!dioramaCanvas) return;
 
@@ -1034,7 +1036,11 @@ const FX = (() => {
       stripHost.appendChild(dioramaCanvas);
 
       diorama = new Scene.Diorama(dioramaCanvas);
-      diorama.load().then((ok) => { if (ok) applyStripMode(); });
+      diorama.load().then((ok) => {
+        if (ok) applyStripMode();
+        // Скин, о котором попросили до загрузки текстур, надеваем здесь
+        if (skinNick) diorama.setPlayerSkin(skinNick, skinBust);
+      });
     }
 
     let obstaclesDirty = true;
@@ -1093,11 +1099,33 @@ const FX = (() => {
     // Время накапливаем, иначе анимация просто замедлилась бы вдвое.
     const MIN_STEP = LOW ? 1 / 30 : 0;
 
+    // ── Бездействие ─────────────────────────────────────────────────────────
+    //
+    // Игрок отошёл, а окно открыто и на виду: живой фон, круг за курсором и
+    // диорама продолжают считаться, хотя смотреть на них некому. Это чистый
+    // расход батареи. Через полминуты без мыши и клавиатуры замираем.
+    //
+    // Возврат ничего не стоит: часы идут от накопленного времени, а не от
+    // числа кадров, поэтому движение продолжается с той же фазы, а не
+    // прыгает вперёд на всё, что мы пропустили.
+    const IDLE_AFTER = 30;
+    let idle = 0;
+    const wake = () => { idle = 0; };
+    for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'focus']) {
+      window.addEventListener(ev, wake, { passive: true });
+    }
+
     function loop(now) {
       requestAnimationFrame(loop);
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
       if (paused) return;
+
+      // Замерли — не считаем ни волну, ни пружину, ни диораму. Последний
+      // нарисованный кадр остаётся на экране, так что глазу не за что
+      // зацепиться: картинка та же, просто неподвижная.
+      idle += dt;
+      if (idle >= IDLE_AFTER) return;
 
       pending += dt;
       if (MIN_STEP && pending < MIN_STEP) return;
@@ -1146,6 +1174,20 @@ const FX = (() => {
         if (stripFx) { stripFx.kind = kind; stripFx.seed(); }
         if (hover && hover.host) { hover.kind = kind; hover.seed(); }
         applyStripMode();
+      },
+      /**
+       * Скин и плащ игрока в диораме.
+       *
+       * Ник запоминаем всегда, а надеваем только когда текстуры уже загружены:
+       * приложение зовёт это при старте, а диорама к тому моменту ещё может
+       * догружаться — без запоминания скин бы просто потерялся.
+       */
+      setPlayerSkin(nick, bust) {
+        skinNick = nick;
+        // Метку помним рядом с ником: скин мог быть сброшен на сервере, и тогда
+        // догоняющий вызов ниже обязан идти по адресу с меткой, а не по чистому.
+        skinBust = bust || 0;
+        if (diorama && diorama.tex) diorama.setPlayerSkin(nick, skinBust);
       }
     };
   }
@@ -1163,7 +1205,8 @@ const FX = (() => {
     HoverFx,
     setPaused(value) { if (controls) controls.setPaused(value); },
     obstaclesChanged() { if (controls) controls.obstaclesChanged(); },
-    refreshMode() { if (controls) controls.refreshMode(); }
+    refreshMode() { if (controls) controls.refreshMode(); },
+    setPlayerSkin(nick, bust) { if (controls) controls.setPlayerSkin(nick, bust); }
   };
 })();
 

@@ -3,9 +3,16 @@ package launcher.auth;
 /**
  * Одна учётная запись лаунчера.
  *
- * Два вида:
+ * Три вида:
  *   offline — просто ник, UUID выводится из него детерминированно, токена нет;
- *   msa     — вход Microsoft, есть refresh-токен, настоящие UUID, ник и XUID.
+ *   msa     — вход Microsoft, есть refresh-токен, настоящие UUID, ник и XUID;
+ *   elyby   — ник, подтверждённый входом на ely.by. Токена нет и он не нужен:
+ *             скин и плащ лаунчер тянет по нику через SkinService, а вход
+ *             живёт в партиции Chromium (см. elyby-state и elyby-wear в
+ *             installer/main.js). Игре такой аккаунт отдаётся как legacy —
+ *             ровно так же, как офлайн-профиль, потому что проверять ник
+ *             на стороне игры лаунчер не умеет; скин при этом подхватывается,
+ *             если клиент настроен на ely.by.
  *
  * Токен доступа Minecraft живёт около суток и в файле не хранится: он берётся
  * из refresh-токена при запуске и держится только в памяти (см. Session).
@@ -21,6 +28,10 @@ public class Account {
 
     public boolean isMicrosoft() {
         return "msa".equals(type);
+    }
+
+    public boolean isElyby() {
+        return "elyby".equals(type);
     }
 
     /** Тип, который ждёт аргумент --userType в игре. */

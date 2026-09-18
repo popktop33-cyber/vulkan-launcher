@@ -127,9 +127,19 @@ public class MinecraftLauncher {
         String launcherVersion = "1.0";
 
         List<String> cmd = new ArrayList<>();
-        cmd.add(findJava(cfg));
+        cmd.add(javaFor(cfg, mcVersion, loaderId, meta));
         // Флаги Aikar: без них G1 даёт рывки на ровном месте (см. JvmFlags)
         cmd.addAll(JvmFlags.aikar(cfg.ramMb));
+        // Аккаунт ely.by: без агента клиент идёт за скином на Mojang, где его
+        // нет, — игрок видит Стива и в одиночной игре, и на сервере.
+        // Пустой список — агент подключать нельзя: тогда лучше Стив, чем
+        // незапустившаяся игра (разбор в AuthlibInjector.argsFor).
+        if (session.elyby && cfg.authlibInjector) {
+            LaunchProgress.update("starting", 96, "Готовим скины ely.by...");
+            List<String> agentArgs = AuthlibInjector.argsFor(session.uuid, session.name);
+            if (!agentArgs.isEmpty()) cmd.addAll(agentArgs);
+            else System.out.println("[pulsePLUS] authlib-injector не подключён — скин в игре не появится");
+        }
         cmd.add("-Djava.library.path=" + nativesPath);
         cmd.add("-Djna.tmpdir=" + nativesPath);
         cmd.add("-Dorg.lwjgl.system.SharedLibraryExtractPath=" + nativesPath);
@@ -148,20 +158,57 @@ public class MinecraftLauncher {
         cmd.add(cp);
         cmd.add(mainClass);
 
-        // Game args
-        cmd.addAll(Arrays.asList(
-            "--username",    username,
-            "--version",     mcVersion,
-            "--gameDir",     profileDir.toAbsolutePath().toString(),
-            "--assetsDir",   assetsDir.toAbsolutePath().toString(),
-            "--assetIndex",  assetIndexId,
-            "--uuid",        session.uuid,
-            "--accessToken", session.accessToken,
-            "--clientId",    session.userType.equals("msa") ? cfg.msaClientId : "",
-            "--xuid",        session.xuid,
-            "--userType",    session.userType,
-            "--versionType", "release"
-        ));
+        // Аргументы игры берём из version-JSON, а не своим списком.
+        //
+        // Свой список совпадал с современными версиями и ломал старые. Здесь
+        // стояли --clientId и --xuid, а у 1.8 и 1.12.2 таких опций нет вовсе —
+        // игра разбирает аргументы строго и на незнакомой падает ещё до окна,
+        // без внятного сообщения. Поэтому сначала новый формат (arguments.game),
+        // потом старый (minecraftArguments одной строкой), а свой список
+        // остаётся запасным на случай, когда в JSON нет ни того, ни другого.
+        JsonArray gameArgs = mergedArgs(null, meta, "game");
+        if (gameArgs.size() > 0 || meta.has("minecraftArguments")) {
+            // Подстановки для аргументов из JSON: имена переменных заданы
+            // самим форматом (${auth_player_name} и подобные), поэтому карта
+            // собирается здесь по месту, а не переиспользуется из ветки с
+            // загрузчиком — там своя область видимости и свои значения.
+            Map<String, String> a = new HashMap<>();
+            a.put("auth_player_name", session.name);
+            a.put("version_name", mcVersion);
+            a.put("game_directory", profileDir.toAbsolutePath().toString());
+            a.put("assets_root", assetsDir.toAbsolutePath().toString());
+            a.put("assets_index_name", assetIndexId);
+            a.put("auth_uuid", session.uuid);
+            a.put("auth_access_token", session.accessToken);
+            a.put("clientid", "msa".equals(session.userType) ? cfg.msaClientId : "");
+            a.put("auth_xuid", session.xuid);
+            a.put("user_type", session.userType);
+            a.put("version_type", "release");
+            a.put("user_properties", "{}");
+            a.put("game_assets", assetsDir.toAbsolutePath().toString());
+
+            if (gameArgs.size() > 0) {
+                cmd.addAll(resolveArgs(gameArgs, a));
+            } else {
+                for (String tok : meta.get("minecraftArguments").getAsString().split(" ")) {
+                    cmd.add(substitute(tok, a));
+                }
+            }
+        } else {
+            cmd.addAll(Arrays.asList(
+                "--username",    username,
+                "--version",     mcVersion,
+                "--gameDir",     profileDir.toAbsolutePath().toString(),
+                "--assetsDir",   assetsDir.toAbsolutePath().toString(),
+                "--assetIndex",  assetIndexId,
+                "--uuid",        session.uuid,
+                "--accessToken", session.accessToken,
+                "--clientId",    session.userType.equals("msa") ? cfg.msaClientId : "",
+                "--xuid",        session.xuid,
+                "--userType",    session.userType,
+                "--versionType", "release"
+            ));
+        }
 
         // IMPORTANT: do NOT use inheritIO(). When the backend is spawned by Electron
         // with piped stdio, the Minecraft child would inherit that pipe; if Electron
@@ -324,9 +371,19 @@ public class MinecraftLauncher {
         vars.put("user_properties", "{}");
 
         List<String> cmd = new ArrayList<>();
-        cmd.add(findJava(cfg));
+        cmd.add(javaFor(cfg, mcVersion, loaderId, meta, baseMeta));
         // Флаги Aikar: без них G1 даёт рывки на ровном месте (см. JvmFlags)
         cmd.addAll(JvmFlags.aikar(cfg.ramMb));
+
+        // Аккаунт ely.by: тот же агент, что и в обычном запуске. Здесь он тоже
+        // к месту — Forge и NeoForge идут через свой загрузчик, но authlib у них
+        // от Mojang и подменяется так же.
+        if (session.elyby && cfg.authlibInjector) {
+            LaunchProgress.update("starting", 96, "Готовим скины ely.by...");
+            List<String> agentArgs = AuthlibInjector.argsFor(session.uuid, session.name);
+            if (!agentArgs.isEmpty()) cmd.addAll(agentArgs);
+            else System.out.println("[pulsePLUS] authlib-injector не подключён — скин в игре не появится");
+        }
 
         // Merge base (vanilla) + loader argument arrays. Loaders that inheritFrom
         // vanilla (e.g. OptiFine) only ADD args (a tweakClass), relying on the base
@@ -518,6 +575,33 @@ public class MinecraftLauncher {
             Path dest = libsDir.resolve(relPath);
             boolean isNative = name != null && name.contains(":natives-");
             if (isNative && !isNativeForCurrentOS(name)) continue;
+
+            // Нативы старого формата (версии игры до 1.19): у LWJGL 2 они лежат не
+            // в artifact, а в downloads.classifiers, и какой из них наш — написано
+            // в поле natives по имени системы. Без этого игра падает с «no lwjgl
+            // in java.library.path» ещё до окна: классы LWJGL на месте, а самих
+            // библиотек рядом нет. Файл кладём на диск — extractNatives найдёт его
+            // по суффиксу имени, в classpath ему не место.
+            if (lib.has("natives") && lib.has("downloads")) {
+                JsonObject dl = lib.getAsJsonObject("downloads");
+                JsonObject nv = lib.getAsJsonObject("natives");
+                String key = osKey();
+                if (nv.has(key) && dl.has("classifiers")) {
+                    // У части библиотек классификатор записан с подстановкой —
+                    // "natives-windows-${arch}". Без замены такого имени в
+                    // манифесте нет, и файл молча не скачивается.
+                    String classifier = nv.get(key).getAsString()
+                        .replace("${arch}", is64Bit() ? "64" : "32");
+                    JsonObject cls = dl.getAsJsonObject("classifiers").getAsJsonObject(classifier);
+                    if (cls != null && cls.has("path")) {
+                        Path nd = libsDir.resolve(cls.get("path").getAsString());
+                        String nu = optString(cls, "url");
+                        if (!Files.exists(nd) && nu != null && nu.startsWith("http")) {
+                            missing.add(new Lib(nd, nu, true));
+                        }
+                    }
+                }
+            }
             // "downloadOnly" libs (e.g. NeoForge's client :slim/:extra/:srg) must be
             // present on disk for the loader to find via ${library_directory}, but must
             // NOT be on the classpath — otherwise two "minecraft" modules collide.
@@ -715,6 +799,19 @@ public class MinecraftLauncher {
                 }
             }
         }
+    }
+
+    /** Имя системы так, как его зовёт поле natives в старых version-JSON. */
+    private static String osKey() {
+        String os = System.getProperty("os.name", "").toLowerCase();
+        if (os.contains("win")) return "windows";
+        if (os.contains("mac") || os.contains("darwin")) return "osx";
+        return "linux";
+    }
+
+    /** Разрядность этой JVM — для подстановки ${arch} в именах классификаторов. */
+    private static boolean is64Bit() {
+        return System.getProperty("sun.arch.data.model", "64").contains("64");
     }
 
     /** Native JAR filename suffix for the current OS + architecture. */
@@ -1068,33 +1165,72 @@ public class MinecraftLauncher {
         throw last;
     }
 
-    static String findJava(LauncherConfig cfg) {
-        if (cfg.javaPath != null && !cfg.javaPath.isBlank()) {
-            if (new File(cfg.javaPath).exists()) return cfg.javaPath;
+    /**
+     * Старшая версия Java, которую требует эта версия игры (см. JavaRuntime).
+     *
+     * У сборки с загрузчиком своего требования обычно нет: её version-JSON
+     * наследуется от ванильного, и поле javaVersion лежит именно там. Отсюда
+     * список, а не одно поле.
+     */
+    private static int requiredJava(JsonObject... metas) {
+        for (JsonObject m : metas) {
+            if (m == null || !m.has("javaVersion")) continue;
+            JsonObject jv = m.getAsJsonObject("javaVersion");
+            if (jv.has("majorVersion")) return jv.get("majorVersion").getAsInt();
         }
-        String javaHome = System.getenv("JAVA_HOME");
-        if (javaHome != null) {
-            boolean win = System.getProperty("os.name","").toLowerCase().contains("win");
-            String exec = javaHome + File.separator + "bin" + File.separator + (win ? "javaw.exe" : "java");
-            if (new File(exec).exists()) return exec;
-        }
-        // Своя Java: сборка без Electron приносит рантайм рядом с собой.
-        // Без этой ветки игра ушла бы в «java» из PATH, а её там может не быть
-        // вовсе — те же Legacy Launcher и подобные носят Java внутри и в
-        // систему её не прописывают, так что «java» у игрока не находится.
-        String own = System.getProperty("java.home");
-        if (own != null && !own.isBlank()) {
-            boolean win = System.getProperty("os.name","").toLowerCase().contains("win");
-            String exec = own + File.separator + "bin" + File.separator + (win ? "javaw.exe" : "java");
-            if (new File(exec).exists()) return exec;
-        }
-        return "java";
+        return 0;   // требование неизвестно — к версии не придираемся
     }
 
-    /** Console java (java.exe, not javaw) — needed to run installers and read output. */
+    /** Имя компонента Java из version-JSON ("java-runtime-delta" и подобные). */
+    private static String javaComponent(JsonObject... metas) {
+        for (JsonObject m : metas) {
+            if (m == null || !m.has("javaVersion")) continue;
+            JsonObject jv = m.getAsJsonObject("javaVersion");
+            if (jv.has("component")) return jv.get("component").getAsString();
+        }
+        return "";
+    }
+
+    /**
+     * Java для запуска игры — в порядке убывания удобства:
+     *
+     *   1. своя в папке сборки: она там именно потому, что версия её требует;
+     *   2. системная ровно той версии, что названа в version-JSON;
+     *   3. скачанная под эту версию (JavaInstaller) — и если скачать не вышло,
+     *      исключение уходит наверх и игрок видит причину, а не падение игры.
+     *
+     * Требование берётся из version-JSON и это не минимум, а именно та версия,
+     * на которой версию игры проверяли: для 1.16.5 это Java 8, и запуск на 17
+     * (формально «не старее») заканчивается ничем.
+     */
+    private static String javaFor(LauncherConfig cfg, String mcVersion, String loaderId,
+                                  JsonObject... metas) throws Exception {
+        Path own = JavaInstaller.exeIn(
+            LauncherConfig.instanceDir(mcVersion, loaderId).resolve("java"));
+        if (own != null) return own.toString();
+
+        int required = requiredJava(metas);
+        if (required <= 0) return JavaRuntime.pick(cfg, required);
+
+        String exact = JavaRuntime.pickExact(cfg, required);
+        if (exact != null) return exact;
+
+        // Автозагрузку выключили — ведём себя как раньше и не качаем ничего.
+        if (!cfg.autoJava) return JavaRuntime.pick(cfg, required);
+
+        LaunchProgress.update("java", 2, "Нужна Java " + required + " — скачиваю...");
+        Path downloaded = JavaInstaller.ensure(mcVersion, loaderId,
+                                               javaComponent(metas), required);
+        System.out.println("[vulkan] Java " + required + " для сборки: " + downloaded);
+        return downloaded.toString();
+    }
+
+    /**
+     * Console java (java.exe, not javaw) — needed to run installers and read output.
+     * Требования по версии здесь нет: установщику годится любая работающая Java.
+     */
     static String findConsoleJava(LauncherConfig cfg) {
-        String j = findJava(cfg);
-        return j.replace("javaw.exe", "java.exe");
+        return JavaRuntime.console(JavaRuntime.pick(cfg, 0));
     }
 
     /** Package-visible download for helper classes (LoaderInstaller). */

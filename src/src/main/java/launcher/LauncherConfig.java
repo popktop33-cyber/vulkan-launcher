@@ -53,6 +53,15 @@ public class LauncherConfig {
     public String lastMode = "pulse";
     public String userName = "Player";
     public String javaPath = "";
+    /**
+     * Скачивать нужную версию Java под версию игры, когда подходящей нет.
+     *
+     * Включено по умолчанию: одной Java на все версии не хватает, и разница
+     * не в «новее — значит лучше». Игре 1.16.5 нужна Java 8, и на 17 она не
+     * пойдёт; игре 26.1 нужна 25, и её на машине обычно нет вовсе. Выключенный
+     * тумблер возвращает прежнее поведение — берём, что найдётся.
+     */
+    public boolean autoJava = true;
     /** Client ID приложения Azure для входа Microsoft. Публичный клиент, секрета нет. */
     public String msaClientId = "";
     /**
@@ -62,6 +71,14 @@ public class LauncherConfig {
     public String curseforgeKey = "";
     /** Источник каталога модов по умолчанию: "modrinth" или "curseforge". */
     public String modSource = "modrinth";
+    /**
+     * Подключать ли игре authlib-injector под аккаунтом ely.by.
+     *
+     * Агент нужен, чтобы клиент брал скины у ely.by, а не у Mojang. Выключить
+     * стоит, если с ним перестал пускать какой-то сервер: без агента игра
+     * работает как раньше, просто со Стивом (см. launcher.minecraft.AuthlibInjector).
+     */
+    public boolean authlibInjector = true;
 
     // ── Base directories ────────────────────────────────────────────────────
 

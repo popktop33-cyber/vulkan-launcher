@@ -29,6 +29,9 @@ import launcher.mods.ModInstallService;
 import launcher.mods.ModManager;
 import launcher.mods.ModUpdateService;
 import launcher.mods.PerformancePack;
+import launcher.skin.AuthlibServer;
+import launcher.skin.ElybyCatalog;
+import launcher.skin.SkinService;
 
 public class WebServer {
 
@@ -68,6 +71,16 @@ public class WebServer {
         server.createContext("/api/accounts", this::handleAccounts);
         server.createContext("/api/accounts/msa/start", this::handleMsaStart);
         server.createContext("/api/accounts/msa/poll", this::handleMsaPoll);
+        // Скин и плащ. Контекст один на оба вида запроса намеренно: HttpServer
+        // сопоставляет по префиксу, и отдельный context("/api/skin/cape") не
+        // поймал бы /api/skin/herkulessi/cape — пути начинаются по-разному.
+        // Разбор вида запроса идёт внутри обработчика.
+        server.createContext("/api/skin", this::handleSkin);
+        // Витрина скинов ely.by. Публичная: каталог отдают и гостю, вход нужен
+        // только чтобы надеть скин, а это делается не отсюда (см. elyby-wear
+        // в installer/main.js — там лежит сессия).
+        server.createContext("/api/elyby/catalog", this::handleElybyCatalog);
+        server.createContext("/api/elyby/preview", this::handleElybyPreview);
         server.createContext("/api/music/state", this::handleMusicState);
         server.createContext("/api/music/tracks", this::handleMusicTracks);
         server.createContext("/api/music/file", this::handleMusicFile);
@@ -77,6 +90,14 @@ public class WebServer {
         server.createContext("/api/music/save-bytebeat", this::handleSaveBytebeatFormula);
         server.createContext("/api/music/delete-bytebeat", this::handleDeleteBytebeatFile);
         server.createContext("/videos/", this::handleVideos);
+
+        // Сервер авторизации для игры: агент authlib-injector получает этот
+        // адрес вместо ely.by, и клиент берёт профиль и текстуры с диска. Тот же
+        // порт, что у лаунчера, — так ссылка на скин не меняется от запуска к
+        // запуску и кэш текстур самого клиента переиспользуется.
+        AuthlibServer authlib = new AuthlibServer();
+        AuthlibServer.bind(port);
+        server.createContext("/authlib", authlib::handle);
 
         server.start();
         System.out.println("[pulsePLUS] HTTP on port " + port);
@@ -134,6 +155,7 @@ public class WebServer {
         out.put("lastMode", cfg.lastMode);
         out.put("userName", cfg.userName);
         out.put("javaPath", cfg.javaPath);
+        out.put("autoJava", cfg.autoJava);
         out.put("msaClientId", cfg.msaClientId);
         out.put("accounts", accountListJson());
         out.put("activeAccountId", activeAccountId());
@@ -170,6 +192,7 @@ public class WebServer {
             m.put("uuid", a.uuid);
             m.put("initial", a.initial());
             m.put("microsoft", a.isMicrosoft());
+            m.put("elyby", a.isElyby());
             m.put("lastLogin", a.lastLogin);
             list.add(m);
         }
@@ -207,6 +230,14 @@ public class WebServer {
             switch (action) {
                 case "add-offline":
                     store.addOffline(body.has("name") ? body.get("name").getAsString() : "");
+                    break;
+                case "add-elyby":
+                    // Ник приходит из окна, а окно для нас — недоверенная
+                    // сторона: пришло бы «../../etc» — его отсекает sanitizeName
+                    store.addElyby(body.has("name") ? body.get("name").getAsString() : "");
+                    break;
+                case "forget-elyby":
+                    store.forgetElyby();
                     break;
                 case "select":
                     Session.invalidate();   // у другого аккаунта свой токен
@@ -694,6 +725,7 @@ public class WebServer {
             if (body.has("lastMode")) cfg.lastMode = body.get("lastMode").getAsString();
             if (body.has("userName")) cfg.userName = body.get("userName").getAsString();
             if (body.has("javaPath")) cfg.javaPath = body.get("javaPath").getAsString();
+            if (body.has("autoJava")) cfg.autoJava = body.get("autoJava").getAsBoolean();
             if (body.has("msaClientId")) cfg.msaClientId = body.get("msaClientId").getAsString().trim();
             if (body.has("curseforgeKey")) cfg.curseforgeKey = body.get("curseforgeKey").getAsString().trim();
             if (body.has("modSource")) cfg.modSource = body.get("modSource").getAsString().trim();
@@ -706,6 +738,179 @@ public class WebServer {
         } catch (Exception e) {
             sendJson(ex, 500, Map.of("ok", false, "error", e.getMessage()));
         }
+    }
+
+    /**
+     * Отдаёт PNG скина или плаща по нику. Сеть ходит отсюда, а не из браузера:
+     * чужая картинка, положенная в canvas через drawImage, делает его «грязным»,
+     * а так ещё и дисковый кэш работает.
+     */
+    private void handleSkin(HttpExchange ex) throws IOException {
+        cors(ex);
+        if (ex.getRequestMethod().equalsIgnoreCase("OPTIONS")) {
+            send(ex, 204, "text/plain", "");
+            return;
+        }
+        // Разбор по сегментам, а не снятием суффиксов: «cape» и «refresh» — это
+        // законные никнеймы, и снятие суффикса съело бы такой ник целиком
+        // (/api/skin/cape — это скин игрока cape, а не плащ пустого ника).
+        String rest = ex.getRequestURI().getPath().substring("/api/skin".length());
+        String[] parts = rest.split("/");
+        String nick = parts.length > 1 ? parts[1] : "";
+        boolean wantCape = false, wantRefresh = false, wantWear = false;
+        for (int i = 2; i < parts.length; i++) {
+            if (parts[i].equals("cape"))         wantCape = true;
+            else if (parts[i].equals("refresh")) wantRefresh = true;
+            else if (parts[i].equals("wear"))    wantWear = true;
+        }
+
+        // Проверка не тут, а в SkinService: ник становится именем файла кэша,
+        // и правило должно быть одно на все входы, включая игровые.
+        if (!SkinService.validNick(nick)) {
+            sendJson(ex, 400, Map.of("ok", false, "error", "некорректный ник"));
+            return;
+        }
+
+        // «Надет вот этот скин» — запись по факту, а не перечитывание. Файл по
+        // нику на ely.by догоняет надевание минутами, поэтому перечитывание
+        // сразу вернуло бы прежний скин; почему так и что берём вместо него —
+        // в SkinService.adopt.
+        if (wantWear) {
+            if (!ex.getRequestMethod().equalsIgnoreCase("POST")) {
+                send(ex, 405, "text/plain", "Method Not Allowed");
+                return;
+            }
+            boolean ok = SkinService.adopt(nick, queryParam(ex, "hash", ""));
+            // 409, а не 400: запрос понятен, но картинки у нас нет — витрину
+            // могли не открывать вовсе. Фронт на это перечитает скин обычным
+            // путём, так что отказ здесь не тупик.
+            sendJson(ex, ok ? 200 : 409, Map.of("ok", ok));
+            return;
+        }
+
+        // Сброс кэша — только POST: у GET есть право кэшироваться по пути, и
+        // тогда забывание скина случалось бы само, без чьего-либо запроса.
+        if (wantRefresh) {
+            if (!ex.getRequestMethod().equalsIgnoreCase("POST")) {
+                send(ex, 405, "text/plain", "Method Not Allowed");
+                return;
+            }
+            SkinService.forget(nick);
+            // Сразу и перекачиваем: ответ тогда говорит, нашлось ли что-то,
+            // и фронт не гадает, показывать голову или букву.
+            sendJson(ex, 200, Map.of(
+                    "ok", true,
+                    "skin", SkinService.skin(nick) != null,
+                    "cape", SkinService.cape(nick) != null));
+            return;
+        }
+
+        Path png = wantCape ? SkinService.cape(nick) : SkinService.skin(nick);
+        if (png == null || !Files.exists(png)) {
+            ex.sendResponseHeaders(404, -1);
+            ex.close();
+            return;
+        }
+
+        byte[] b = Files.readAllBytes(png);
+        ex.getResponseHeaders().set("Content-Type", "image/png");
+        // Скин не «живое состояние»: он и на диске лежит сутки. Без этого заголовка
+        // Стив перезапрашивался бы на каждой перерисовке диорамы.
+        ex.getResponseHeaders().set("Cache-Control", "public, max-age=3600");
+        ex.sendResponseHeaders(200, b.length);
+        ex.getResponseBody().write(b);
+        ex.close();
+    }
+
+    /**
+     * Страница витрины скинов ely.by.
+     *
+     * Разметку сайта сюда не пускаем: наружу уходит только то, что нужно
+     * сетке — хеш картинки, тонкий ли скин, число носителей, теги и наш
+     * вердикт «взрослое». Полей сайта здесь нет намеренно, чтобы смена их
+     * разметки ломала один класс, а не весь фронт.
+     *
+     * Отсев взрослых — здесь, а не в браузере: тогда скрытое не приезжает в
+     * лаунчер вообще, и включённый тумблер ничего не «проявляет» задним числом.
+     */
+    private void handleElybyCatalog(HttpExchange ex) throws IOException {
+        cors(ex);
+        if (ex.getRequestMethod().equalsIgnoreCase("OPTIONS")) {
+            send(ex, 204, "text/plain", "");
+            return;
+        }
+        int page = 1;
+        try { page = Integer.parseInt(queryParam(ex, "page", "1")); } catch (Exception ignored) { }
+        String query = queryParam(ex, "q", "");
+        boolean safe = !"0".equals(queryParam(ex, "safe", "1"));
+
+        try {
+            ElybyCatalog.Page p = ElybyCatalog.page(page, query);
+            // Досмотр по картинкам — только когда фильтр включён. Он стоит
+            // загрузки сорока превью (они тут же лягут в дисковый кэш), и
+            // платить её ради значка «18+» при выключенном фильтре незачем:
+            // выключив фильтр, игрок уже сказал, что показывать можно всё.
+            if (safe) ElybyCatalog.screen(p);
+            List<Map<String, Object>> items = new ArrayList<>();
+            int hidden = 0;
+            for (ElybyCatalog.Skin s : p.items) {
+                if (s.adult) {
+                    hidden++;
+                    if (safe) continue;
+                }
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("id", s.id);
+                m.put("hash", s.hash);
+                m.put("slim", s.slim);
+                m.put("wearers", s.wearers);
+                m.put("tags", s.tags);
+                m.put("adult", s.adult);
+                items.add(m);
+            }
+            Map<String, Object> out = new LinkedHashMap<>();
+            out.put("ok", true);
+            out.put("page", p.page);
+            out.put("last", p.last);
+            out.put("total", p.total);
+            // Сколько скрыто фильтром — чтобы витрина могла честно сказать
+            // «ещё N скрыто», а не молча показывать дыру
+            out.put("hidden", hidden);
+            out.put("items", items);
+            sendJson(ex, 200, out);
+        } catch (Exception e) {
+            sendJson(ex, 500, Map.of("ok", false, "error", String.valueOf(e.getMessage())));
+        }
+    }
+
+    /**
+     * Картинка скина из витрины.
+     *
+     * Принимает только хеш, а не адрес: полный URL собирает ElybyCatalog, и
+     * подсунуть сюда чужую ссылку нельзя. Иначе эндпоинт стал бы способом
+     * ходить по произвольным адресам от имени лаунчера.
+     */
+    private void handleElybyPreview(HttpExchange ex) throws IOException {
+        cors(ex);
+        if (ex.getRequestMethod().equalsIgnoreCase("OPTIONS")) {
+            send(ex, 204, "text/plain", "");
+            return;
+        }
+        String rest = ex.getRequestURI().getPath().substring("/api/elyby/preview".length());
+        String hash = rest.replace("/", "").replace(".png", "");
+        Path png = ElybyCatalog.preview(hash);
+        if (png == null || !Files.exists(png)) {
+            ex.sendResponseHeaders(404, -1);
+            ex.close();
+            return;
+        }
+        byte[] b = Files.readAllBytes(png);
+        ex.getResponseHeaders().set("Content-Type", "image/png");
+        // Хеш — это и есть содержимое файла: при том же хеше картинка та же,
+        // поэтому кэш можно держать сколько угодно.
+        ex.getResponseHeaders().set("Cache-Control", "public, max-age=604800, immutable");
+        ex.sendResponseHeaders(200, b.length);
+        ex.getResponseBody().write(b);
+        ex.close();
     }
 
     private void cors(HttpExchange ex) {

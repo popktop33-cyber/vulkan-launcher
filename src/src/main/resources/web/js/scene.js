@@ -17,6 +17,9 @@
 
 const Scene = (() => {
   const BASE = 'assets/scene/';
+  // Скин и плащ отдаёт свой бэкенд, а не чужой сайт: картинка с чужого домена
+  // делает canvas «грязным», и диорама перестаёт рисоваться вовсе.
+  const SKIN_API = '/api/skin/';
 
   const TEX_FILES = {
     grassSide: 'grass_block_side.png',
@@ -93,6 +96,21 @@ const Scene = (() => {
   ];
   const PLAYER_HEAD = { uv: [0, 0], from: [-4, 12, -4], to: [4, 20, 4], pivot: [0, 12, 0] };
 
+  // Плащ — коробка 10x12x1 за спиной, как в игре, но обрезанная по землю:
+  // фигура сидит, и полная высота ушла бы под траву. Развёртка от [0,0] ложится
+  // на занятую область настоящего плаща пиксель в пиксель — проверено по карте
+  // прозрачности реального плаща.
+  //
+  // Прижат к спине он был бы не виден вовсе: камера стоит спереди, а силуэт
+  // тела по бокам задают руки — шестнадцать юнитов против десяти у плаща.
+  // Поэтому плащ откинут назад, как на ветру: так его край выходит за силуэт
+  // и читается. Сдвигать его вбок пробовал — выигрыша в читаемости нет,
+  // а симметрия теряется, так что крепление остаётся каноничным.
+  const PLAYER_CAPE = {
+    uv: [0, 0], from: [-5, 0, -3.6], to: [5, 12, -2.6],
+    pivot: [0, 12, -3.1], baseRot: 62 * Math.PI / 180
+  };
+
   // Суперсэмплинг: фигуру считаем втрое крупнее в отдельный холст и уменьшаем
   // при переносе. Так сглаживается контур, а текстура остаётся пиксельной —
   // обычное сглаживание размыло бы её в кашу.
@@ -147,10 +165,16 @@ const Scene = (() => {
     return [p[0], pivot[1] + y * c - z * s, pivot[2] + y * s + z * c];
   }
 
-  /** Модель → экран. Ортографическая проекция с поворотом камеры. */
-  function project(p) {
-    const cy = Math.cos(VIEW_YAW), sy = Math.sin(VIEW_YAW);
-    const cp = Math.cos(VIEW_PITCH), sp = Math.sin(VIEW_PITCH);
+  /**
+   * Модель → экран. Ортографическая проекция с поворотом камеры.
+   *
+   * Углы — параметрами, а не константами модуля: диораме нужен один
+   * фиксированный ракурс, а витрине скинов — камера, которую крутит игрок.
+   * Счёт общий, иначе это были бы две разные проекции с разными ошибками.
+   */
+  function projectAt(p, yaw, pitch) {
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const x1 = p[0] * cy + p[2] * sy;
     const z1 = -p[0] * sy + p[2] * cy;
     const y2 = p[1] * cp - z1 * sp;
@@ -158,14 +182,22 @@ const Scene = (() => {
     return [x1, -y2, z2];
   }
 
+  /** Ракурс диорамы — тот же счёт, но углы заданы раз и навсегда. */
+  function project(p) {
+    return projectAt(p, VIEW_YAW, VIEW_PITCH);
+  }
+
   /** Глубина нормали в системе камеры: > 0 — грань смотрит на зрителя. */
-  function normalDepth(n) {
-    const cy = Math.cos(VIEW_YAW), sy = Math.sin(VIEW_YAW);
-    const cp = Math.cos(VIEW_PITCH), sp = Math.sin(VIEW_PITCH);
+  function normalDepthAt(n, yaw, pitch) {
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
     const x1 = n[0] * cy + n[2] * sy;
     const z1 = -n[0] * sy + n[2] * cy;
     return n[1] * sp + z1 * cp;
   }
+
+  /** Камера диорамы. Витрина скинов передаёт свою. */
+  const CAM = { yaw: VIEW_YAW, pitch: VIEW_PITCH };
 
   /**
    * Раскладка коробки в текстуре Minecraft. Для коробки (w,h,d) со смещением (u,v):
@@ -254,11 +286,36 @@ const Scene = (() => {
       const imgs = await Promise.all(entries.map(([, f]) => loadImage(BASE + f)));
       this.tex = {};
       entries.forEach(([k], i) => { this.tex[k] = imgs[i]; });
+      // Запасной Стив — на случай, когда ника нет или скина у него не нашлось
+      this.tex.steveDefault = this.tex.steve;
+      this.tex.cape = null;
       // Трава и листва в текстурах серые — в игре их красит биом, здесь некому
       this.tex.grass = tinted(this.tex.grass, TINT.grass);
       this.tex.leaves = tinted(this.tex.leaves, TINT.leaves);
       this.trackPointer();
       return !!this.tex.grassSide;
+    }
+
+    /**
+     * Надеть скин и плащ игрока.
+     *
+     * Оба берутся только со своего бэкенда — там и дисковый кэш, и никакого
+     * «грязного» холста. Чего не пришло, того нет: скин откатывается на
+     * стандартного Стива, а плащ просто не рисуется. Диорама без игрока не
+     * остаётся ни в одном случае.
+     */
+    async setPlayerSkin(nick, bust) {
+      if (!nick) {
+        this.tex.steve = this.tex.steveDefault;
+        this.tex.cape = null;
+        return;
+      }
+      // bust — метка после сброса кэша на сервере: без неё браузер отдал бы
+      // свою копию картинки, и скин остался бы прежним.
+      const url = SKIN_API + encodeURIComponent(nick) + (bust ? `?t=${bust}` : '');
+      const [skin, cape] = await Promise.all([loadImage(url), loadImage(url + '/cape')]);
+      this.tex.steve = skin || this.tex.steveDefault;
+      this.tex.cape = cape;
     }
 
     /** Следим за курсором в координатах холста — по нему поворачивается голова. */
@@ -545,13 +602,18 @@ const Scene = (() => {
         else if (box.id === 'thighL' || box.id === 'shinL') partPitch = -swing;
         else if (box.id === 'armR') partPitch = armSwing;
         else if (box.id === 'armL') partPitch = -armSwing;
-        this.collectBox(faces, box, 0, partPitch, pox, poy, scale * SS);
+        this.collectBox(faces, box, 0, partPitch, pox, poy, scale * SS, tex);
       }
-      this.collectBox(faces, PLAYER_HEAD, yaw, pitch, pox, poy, scale * SS);
-
+      // Плащ — своя текстура, поэтому он передаёт её граням отдельно: иначе
+      // коробка плаща взяла бы кусок скина. Сортировка по глубине сама положит
+      // его за спину, отдельного порядка рисования не нужно.
+      if (this.tex.cape) {
+        this.collectBox(faces, PLAYER_CAPE, 0, 0, pox, poy, scale * SS, this.tex.cape);
+      }
+      this.collectBox(faces, PLAYER_HEAD, yaw, pitch, pox, poy, scale * SS, tex);
       faces.sort((a, b) => a.depth - b.depth);   // дальние сначала
       for (const f of faces) {
-        drawQuad(pctx, tex, f.quad, f.uv, f.shade, 1);
+        drawQuad(pctx, f.tex, f.quad, f.uv, f.shade, 1);
       }
 
       ctx.save();
@@ -561,34 +623,64 @@ const Scene = (() => {
       ctx.restore();
     }
 
-    /** Собирает видимые грани коробки с учётом её позы и поворота. */
-    collectBox(out, box, yaw, pitch, ox, oy, scale) {
-      const bx0 = box.from[0], by0 = box.from[1], bz0 = box.from[2];
-      const bx1 = box.to[0], by1 = box.to[1], bz1 = box.to[2];
-      const pivot = box.pivot || [0, 0, 0];
-      // baseRot — поза самой части (наклон бедра или плеча), pitch — покачивание
-      const totalX = (box.baseRot || 0) + pitch;
-      const rot = (p) => rotX(rotY(p, yaw, pivot), totalX, pivot);
-
-      for (const [name, uv] of boxFaces(box.uv, bx1 - bx0, by1 - by0, bz1 - bz0)) {
-        let corners = faceCorners(name, bx0, by0, bz0, bx1, by1, bz1);
-        let n = FACE_NORMAL[name];
-        if (yaw !== 0 || totalX !== 0) {
-          corners = corners.map(rot);
-          n = rotX(rotY(n, yaw, [0, 0, 0]), totalX, [0, 0, 0]);
-        }
-        // Грань отвёрнута от камеры — не рисуем
-        if (normalDepth(n) <= 0.02) continue;
-
-        const quad = corners.map((c) => {
-          const r = project(c);
-          return [ox + r[0] * scale, oy + r[1] * scale, r[2]];
-        });
-        const depth = (quad[0][2] + quad[1][2] + quad[2][2] + quad[3][2]) * 0.25;
-        out.push({ depth, quad, uv, shade: FACE_SHADE[name] });
-      }
+    /**
+     * Собирает видимые грани коробки с учётом её позы и поворота.
+     *
+     * Текстура идёт параметром, а не берётся из this.tex.steve: у плаща она своя,
+     * и без этого коробка плаща натянула бы на себя кусок скина.
+     */
+    collectBox(out, box, yaw, pitch, ox, oy, scale, tex) {
+      collectBox(out, box, yaw, pitch, ox, oy, scale, tex, CAM);
     }
   }
 
-  return { Diorama };
+  /**
+   * Собирает видимые грани коробки с учётом её позы и поворота.
+   *
+   * Вынесено из класса наружу: тем же счётом пользуется витрина скинов, а ей
+   * нужна своя камера. Внутри класса остался тонкий переходник — drawPlayer
+   * зовёт его по-старому.
+   *
+   * box.uvDim — размеры для РАСКЛАДКИ В АТЛАСЕ, если они не совпадают с
+   * размерами самой коробки. Нужно ровно для второго слоя одежды: в игре он
+   * выпущен наружу на пол-пикселя, но нарисован по развёртке ОСНОВНОЙ части.
+   * Без этого шляпа 9x9x9 читала бы атлас со сдвигом и закрывала голову
+   * наполовину — проверено на подкрашенном эталоне.
+   */
+  function collectBox(out, box, yaw, pitch, ox, oy, scale, tex, cam) {
+    const bx0 = box.from[0], by0 = box.from[1], bz0 = box.from[2];
+    const bx1 = box.to[0], by1 = box.to[1], bz1 = box.to[2];
+    const pivot = box.pivot || [0, 0, 0];
+    // baseRot — поза самой части (наклон бедра или плеча), pitch — покачивание
+    const totalX = (box.baseRot || 0) + pitch;
+    const rot = (p) => rotX(rotY(p, yaw, pivot), totalX, pivot);
+
+    const dim = box.uvDim || [bx1 - bx0, by1 - by0, bz1 - bz0];
+    for (const [name, uv] of boxFaces(box.uv, dim[0], dim[1], dim[2])) {
+      let corners = faceCorners(name, bx0, by0, bz0, bx1, by1, bz1);
+      let n = FACE_NORMAL[name];
+      if (yaw !== 0 || totalX !== 0) {
+        corners = corners.map(rot);
+        n = rotX(rotY(n, yaw, [0, 0, 0]), totalX, [0, 0, 0]);
+      }
+      // Грань отвёрнута от камеры — не рисуем
+      if (normalDepthAt(n, cam.yaw, cam.pitch) <= 0.02) continue;
+
+      const quad = corners.map((c) => {
+        const r = projectAt(c, cam.yaw, cam.pitch);
+        return [ox + r[0] * scale, oy + r[1] * scale, r[2]];
+      });
+      const depth = (quad[0][2] + quad[1][2] + quad[2][2] + quad[3][2]) * 0.25;
+      out.push({ depth, quad, uv, shade: FACE_SHADE[name], tex });
+    }
+  }
+
+  return {
+    Diorama,
+    // Наружу — те же примитивы, которыми рисуется диорама: витрина скинов
+    // собирает из них стоячую фигуру. Второго рендерера быть не должно.
+    boxFaces, faceCorners, drawQuad, collectBox,
+    rotX, rotY, projectAt, normalDepthAt, loadImage,
+    FACE_SHADE, FACE_NORMAL
+  };
 })();

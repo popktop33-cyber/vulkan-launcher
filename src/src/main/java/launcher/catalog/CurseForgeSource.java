@@ -173,17 +173,31 @@ public final class CurseForgeSource {
             if (!el.isJsonObject()) continue;
             JsonObject mod = el.getAsJsonObject();
 
+            /*
+             * Версии берём из latestFilesIndexes, а не из latestFiles.
+             *
+             * latestFiles — это три самых свежих файла проекта. У мода, который
+             * живёт давно, там окажутся только новые версии игры, и запрошенная
+             * не попадёт в список вовсе. Фронтенд сверяет свою версию именно с
+             * этим списком и на несовпадении пишет «Blocked» — так весь каталог
+             * CurseForge и показывался недоступным: у Sodium списком версий было
+             * «1.21.10, 26.2», а просили 1.21.11.
+             *
+             * latestFilesIndexes держит по одной записи на каждую пару «версия
+             * игры + загрузчик», и перечень в ней полный. Загрузчик отсеиваем
+             * сразу: без этого версия, у которой файл есть только под Forge,
+             * попала бы в список для Fabric, и кнопка предложила бы установку,
+             * которая заведомо не найдёт файл.
+             */
             Set<String> versions = new LinkedHashSet<>();
-            JsonArray latest = mod.getAsJsonArray("latestFiles");
-            if (latest != null) {
-                for (JsonElement fEl : latest) {
-                    if (!fEl.isJsonObject()) continue;
-                    JsonArray gv = fEl.getAsJsonObject().getAsJsonArray("gameVersions");
-                    if (gv == null) continue;
-                    for (JsonElement v : gv) {
-                        String s = v.getAsString();
-                        if (looksLikeMcVersion(s)) versions.add(s);
-                    }
+            JsonArray indexes = mod.getAsJsonArray("latestFilesIndexes");
+            if (indexes != null) {
+                for (JsonElement iEl : indexes) {
+                    if (!iEl.isJsonObject()) continue;
+                    JsonObject entry = iEl.getAsJsonObject();
+                    if (lt != 0 && num(entry, "modLoader") != lt) continue;
+                    String gameVersion = str(entry, "gameVersion", "");
+                    if (looksLikeMcVersion(gameVersion)) versions.add(gameVersion);
                 }
             }
 

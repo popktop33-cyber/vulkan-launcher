@@ -19,10 +19,10 @@
   const CARD_GAP = 14;        // зазор между подсветкой и окошком
   const SPOT_PAD = 6;         // насколько подсветка шире элемента
 
-  /* Шаги. Порядок — сначала Vanilla, потом vulkan, в конце предложение
-     показать дополнительное.
+  /* Шаги. Порядок — основной круг по вкладкам, в конце предложение показать
+     дополнительное.
 
-     ready()  — состояние, в котором шаг уместен: и вкладка, и режим.
+     ready()  — состояние, в котором шаг уместен: нужная вкладка.
                 Перестало выполняться — сворачиваемся в уголок и ждём.
                 Проверять одну вкладку мало: без неё обучение считало уход в
                 настройки нормальным и молча пролистывало шаги, у которых цель
@@ -31,20 +31,16 @@
                 засчитывается сам, без кнопки «дальше».
      Если done нет — шаг листается кнопкой. */
   function buildSteps() {
-    const inVanilla = () => currentMode === 'vanilla';
-    const inPulse = () => currentMode === 'pulse';
     const onTab = (name) => () => typeof currentTab !== 'undefined' && currentTab === name;
 
     return [
-      // ── Основной круг: Vanilla ─────────────────────────────────────────────
-      { id: 's1', target: '#vanillaModeBtn', ready: onTab('play'),
-        title: 'tut.s1.title', body: 'tut.s1.body', done: inVanilla },
-      { id: 's2', target: '#versionsCard', ready: () => onTab('play')() && inVanilla(),
+      // ── Основной круг ──────────────────────────────────────────────────────
+      { id: 's2', target: '#versionsCard', ready: onTab('play'),
         title: 'tut.s2.title', body: 'tut.s2.body',
-        done: () => inVanilla() && !!document.querySelector('#versionList .version-item.active') },
-      { id: 's3', target: '#launchBtn', ready: () => onTab('play')() && inVanilla(),
+        done: () => !!document.querySelector('#versionList .version-item.active') },
+      { id: 's3', target: '#launchBtn', ready: onTab('play'),
         title: 'tut.s3.title', body: 'tut.s3.body' },
-      { id: 's4', target: '#versionSummary', ready: () => onTab('play')() && inVanilla(),
+      { id: 's4', target: '#versionSummary', ready: onTab('play'),
         title: 'tut.s4.title', body: 'tut.s4.body' },
       { id: 's5', target: '.nav-btn:nth-child(2)', ready: () => true,
         title: 'tut.s5.title', body: 'tut.s5.body', done: onTab('mods') },
@@ -71,18 +67,10 @@
         title: 'tut.s13.title', body: 'tut.s13.body' },
       { id: 's14', target: '#langSelect', ready: onTab('settings'),
         title: 'tut.s14.title', body: 'tut.s14.body' },
+      { id: 's16', target: '#themeSwitch', ready: onTab('settings'),
+        title: 'tut.s16.title', body: 'tut.s16.body' },
       { id: 's15', target: '#accountBar', ready: () => true,
         title: 'tut.s15.title', body: 'tut.s15.body' },
-
-      // ── Основной круг: vulkan ──────────────────────────────────────────────
-      { id: 'v1', target: '#pulseModeBtn', ready: () => true,
-        title: 'tut.v1.title', body: 'tut.v1.body', done: inPulse },
-      { id: 'v2', target: '#heroTitle', ready: () => onTab('play')() && inPulse(),
-        title: 'tut.v2.title', body: 'tut.v2.body' },
-      { id: 'v3', target: '#pulseLockCard', ready: () => onTab('play')() && inPulse(),
-        title: 'tut.v3.title', body: 'tut.v3.body' },
-      { id: 'v4', target: '.nav-btn:nth-child(2)', ready: () => onTab('play')() && inPulse(),
-        title: 'tut.v4.title', body: 'tut.v4.body' },
 
       // ── Дополнительное ─────────────────────────────────────────────────────
       { id: 'e1', target: '#musicCard', ready: () => currentTab === 'play',

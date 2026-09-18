@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>vulkan launcher — установка</title>
+<style>
+  /* Макет установщика: пошаговый мастер, как у обычных программ — на каждой
+     странице одна вещь и объяснение к ней. Ничего не качает и не ставит;
+     страницу можно перезагружать (F5), показ начинается заново. */
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    min-height:100vh;display:grid;place-items:center;
+    background:#0e0f14;color:#dfe3f5;font-family:"Segoe UI",system-ui,sans-serif;
+    font-size:12px
+  }
+
+  /* Окно обычного размера для установщика — как у NSIS-мастеров */
+  .boot{
+    width:480px;height:280px;background:#14161d;border:1px solid #232634;
+    border-radius:8px;padding:16px 20px 14px;display:flex;flex-direction:column
+  }
+
+  .head{display:flex;align-items:center;margin-bottom:16px}
+  .title{font-size:13px;font-weight:700;color:#7d5cff}
+  .title b{color:#dfe3f5;font-weight:700}
+  select{
+    margin-left:auto;background:#1b1e27;color:#dfe3f5;border:1px solid #2a2e3d;
+    border-radius:5px;padding:3px 6px;font:inherit;font-size:11px;outline:none
+  }
+
+  /* Содержимое страницы: заголовок, объяснение, один элемент */
+  .page{flex:1}
+  .page h2{font-size:15px;font-weight:600;margin-bottom:7px}
+  .page p{color:#8b90ad;line-height:1.5;font-size:11.5px}
+  .body{margin-top:14px}
+
+  input[type=text]{
+    width:100%;background:#1b1e27;color:#c3c9e4;border:1px solid #2a2e3d;
+    border-radius:5px;padding:7px 10px;font:inherit;font-size:11.5px;outline:none
+  }
+  input[type=text]:focus{border-color:#4a4270}
+
+  .opt{display:flex;align-items:center;gap:9px;padding:5px 0;color:#c3c9e4}
+  .opt input{accent-color:#7d5cff;width:14px;height:14px;flex:none}
+
+  /* Низ окна: где мы находимся и что можно нажать */
+  .foot{display:flex;align-items:center;gap:9px;border-top:1px solid #1f222c;padding-top:12px}
+  .step-no{color:#5f6480;font-size:11px}
+  .btn{
+    border:1px solid #2a2e3d;background:#1b1e27;color:#dfe3f5;border-radius:6px;
+    padding:7px 16px;font:inherit;font-size:12px;cursor:pointer
+  }
+  .btn:hover{background:#222634;border-color:#39405a}
+  .btn:disabled{opacity:.4;cursor:default}
+  .btn.primary{background:#7d5cff;border-color:#7d5cff;color:#fff;font-weight:600}
+  .btn.primary:hover{background:#8b6dff}
+  .foot .right{margin-left:auto;display:flex;gap:9px}
+
+  /* Страница установки: полоса и что делается сейчас */
+  .bar{height:5px;border-radius:3px;background:#22252f;overflow:hidden;margin-top:4px}
+  .bar > i{display:block;height:100%;width:0;border-radius:3px;background:#7d5cff;transition:width .35s linear}
+  .boot.done .bar > i{background:#53d86f}
+  .sub{margin-top:9px;font-size:11px;color:#6f7591;min-height:16px}
+
+  .gone{display:none}
+</style>
+</head>
+<body>
+  <div class="boot" id="boot">
+    <div class="head">
+      <div class="title">vulkan<b> launcher</b></div>
+      <select id="lang">
+        <option value="ru">Русский</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+
+    <div class="page" id="page"></div>
+
+    <div class="foot">
+      <span class="step-no" id="stepNo"></span>
+      <div class="right">
+        <button class="btn" id="back" data-i18n="back">Назад</button>
+        <button class="btn primary" id="next" data-i18n="next">Далее</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  const TEXT = {
+    ru: {
+      back: 'Назад', next: 'Далее', install: 'Установить', finish: 'Готово',
+      stepOf: (a, b) => `Шаг ${a} из ${b}`,
+      pages: [
+        { h: 'Установка лаунчера',
+          p: 'Мастер поставит vulkan launcher на этот компьютер. Нужно около 100 МБ и интернет — файлы скачаются сейчас.' },
+        { h: 'Куда установить',
+          p: 'Лаунчер встанет в эту папку. Права администратора не нужны: папка внутри профиля, и удалить лаунчер можно без пароля.' },
+        { h: 'Ярлыки',
+          p: 'Отметьте, что нужно. Второй ярлык запускает чистую игру без сборки и модов.' },
+        { h: 'Java для игры',
+          p: 'Разным версиям нужна разная Java: 1.16.5 — восьмая, 26.1 — двадцать пятая. Если скачать сейчас, при первом запуске ждать не придётся.' },
+        { h: 'Установка', p: 'Закройте окно, только если передумали — файлы уже качаются.' },
+        { h: 'Установлено',
+          p: 'Миры, моды и аккаунты лежат отдельно, в папке pulsePLUS. Удаление лаунчера их не тронет.' },
+      ],
+      run: 'Запустить лаунчер',
+      optDesktop: 'Ярлык на рабочем столе',
+      optStartMenu: 'Ярлык в меню «Пуск»',
+      optVanilla: 'Второй ярлык — Vanilla',
+      optJava: 'Скачать Java заранее',
+      done: 'Готово', of: 'из', units: ['КБ', 'МБ'],
+      stages: ['Проверяю версию', 'Скачиваю файлы лаунчера', 'Скачиваю Java', 'Распаковываю', 'Создаю ярлыки'],
+    },
+    en: {
+      back: 'Back', next: 'Next', install: 'Install', finish: 'Finish',
+      stepOf: (a, b) => `Step ${a} of ${b}`,
+      pages: [
+        { h: 'Install the launcher',
+          p: 'This wizard will install vulkan launcher. It needs about 100 MB and an internet connection — files download now.' },
+        { h: 'Install location',
+          p: 'The launcher goes into this folder. No administrator rights needed: it is inside your profile, and you can remove it without a password.' },
+        { h: 'Shortcuts',
+          p: 'Pick what you need. The second shortcut starts a clean game without the modded profile.' },
+        { h: 'Java for the game',
+          p: 'Different versions need different Java: 1.16.5 wants 8, 26.1 wants 25. Downloading now means no wait on first launch.' },
+        { h: 'Installing', p: 'Close the window only if you changed your mind — files are already downloading.' },
+        { h: 'Installed',
+          p: 'Worlds, mods and accounts live separately, in the pulsePLUS folder. Removing the launcher will not touch them.' },
+      ],
+      run: 'Run the launcher',
+      optDesktop: 'Desktop shortcut',
+      optStartMenu: 'Start menu shortcut',
+      optVanilla: 'Second shortcut — Vanilla',
+      optJava: 'Download Java now',
+      done: 'Done', of: 'of', units: ['KB', 'MB'],
+      stages: ['Checking version', 'Downloading launcher files', 'Downloading Java', 'Unpacking', 'Creating shortcuts'],
+    },
+  };
+
+  const $ = (s) => document.querySelector(s);
+  let lang = 'ru';
+  let step = 0;          // страница мастера
+  let installing = false;
+
+  const L = () => TEXT[lang];
+  const human = (b) => b >= 1048576
+    ? (b / 1048576).toFixed(1).replace('.', ',') + ' ' + L().units[1]
+    : Math.round(b / 1024) + ' ' + L().units[0];
+
+  const LAST_SETUP = 3;  // после этой страницы начинается установка
+
+  /** Собирает страницу по её номеру. Одна страница — одна вещь. */
+  function render() {
+    const T = L();
+    const pg = T.pages[step];
+    const host = $('#page');
+
+    let body = '';
+    if (step === 1) {
+      body = `<div class="body"><input type="text" id="path"
+        value="C:\\Users\\…\\AppData\\Local\\Programs\\vulkan launcher"></div>`;
+    } else if (step === 2) {
+      body = `<div class="body">
+        <label class="opt"><input type="checkbox" id="optDesktop" checked><span>${T.optDesktop}</span></label>
+        <label class="opt"><input type="checkbox" id="optStartMenu" checked><span>${T.optStartMenu}</span></label>
+        <label class="opt"><input type="checkbox" id="optVanilla" checked><span>${T.optVanilla}</span></label>
+      </div>`;
+    } else if (step === 3) {
+      body = `<div class="body">
+        <label class="opt"><input type="checkbox" id="optJava" checked><span>${T.optJava}</span></label>
+      </div>`;
+    } else if (step === 4) {
+      body = `<div class="body"><div class="bar"><i id="fill"></i></div>
+        <div class="sub" id="sub"></div></div>`;
+    } else if (step === 5) {
+      body = `<div class="body">
+        <label class="opt"><input type="checkbox" id="optRun" checked><span>${T.run}</span></label>
+      </div>`;
+    }
+
+    host.innerHTML = `<h2>${pg.h}</h2><p>${pg.p}</p>${body}`;
+
+    // Номер показываем только на страницах выбора: у установки и итога его нет
+    $('#stepNo').textContent = (installing || step > LAST_SETUP) ? '' : T.stepOf(step + 1, 4);
+    $('#back').textContent = T.back;
+    $('#back').disabled = step === 0 || installing;
+    $('#next').textContent = step === LAST_SETUP ? T.install : (step === 5 ? T.finish : T.next);
+    $('#next').disabled = installing && step === 4;
+    $('#back').classList.toggle('gone', step === 4 || step === 5);
+    $('#next').classList.toggle('gone', false);
+  }
+
+  /** Установка: показывается на шаге 4, дальше сама переходит к итогу. */
+  function install() {
+    installing = true;
+    const T = L();
+    const stages = [
+      { text: T.stages[0], ms: 800 },
+      { text: T.stages[1], ms: 4200, bytes: 96 * 1048576 },
+    ];
+    if ($('#optJava') && $('#optJava').checked) {
+      stages.push({ text: T.stages[2], ms: 2400, bytes: 42 * 1048576 });
+    }
+    stages.push({ text: T.stages[3], ms: 1200 });
+    if (($('#optDesktop') && $('#optDesktop').checked) ||
+        ($('#optStartMenu') && $('#optStartMenu').checked) ||
+        ($('#optVanilla') && $('#optVanilla').checked)) {
+      stages.push({ text: T.stages[4], ms: 600 });
+    }
+
+    const TOTAL = stages.reduce((a, s) => a + s.ms, 0);
+    let i = 0;
+
+    const tick = () => {
+      if (i >= stages.length) {
+        installing = false;
+        $('#boot').classList.add('done');
+        step = 5;
+        render();
+        return;
+      }
+      const s = stages[i];
+      const nextBtn = $('#next');
+      if (nextBtn) nextBtn.disabled = true;
+      const t0 = performance.now();
+      const before = stages.slice(0, i).reduce((a, x) => a + x.ms, 0);
+
+      const frame = (now) => {
+        const k = Math.min(1, (now - t0) / s.ms);
+        const p = Math.round((before + s.ms * k) / TOTAL * 100);
+        const fill = $('#fill');
+        if (fill) fill.style.width = p + '%';
+        const sub = $('#sub');
+        if (sub) {
+          let line = s.text + '  ·  ' + p + ' %';
+          if (s.bytes) {
+            const got = Math.round(s.bytes * k);
+            const speed = got / 1048576 / Math.max(0.2, (now - t0) / 1000);
+            line += '  ·  ' + human(got) + ' ' + T.of + ' ' + human(s.bytes) +
+              '  ·  ' + speed.toFixed(1).replace('.', ',') + ' ' + T.units[1] + '/с';
+          }
+          sub.textContent = line;
+        }
+        if (k < 1) requestAnimationFrame(frame);
+        else { i++; tick(); }
+      };
+      requestAnimationFrame(frame);
+    };
+    tick();
+  }
+
+  function goNext() {
+    if (step === LAST_SETUP) {
+      // installing ставим ДО отрисовки: от него зависит, показывать ли номер
+      // шага, и иначе на странице установки мелькало бы «Шаг 5 из 4».
+      installing = true;
+      step = 4;
+      render();
+      install();
+      return;
+    }
+    if (step === 5) {
+      render();
+      return;
+    }
+    step++;
+    render();
+  }
+
+  function goBack() {
+    if (step > 0 && !installing) { step--; render(); }
+  }
+
+  function applyLang() {
+    document.documentElement.lang = lang;
+    render();
+  }
+
+  $('#lang').addEventListener('change', (e) => { lang = e.target.value; applyLang(); });
+  $('#next').addEventListener('click', goNext);
+  $('#back').addEventListener('click', goBack);
+
+  applyLang();
+</script>
+</body>
+</html>

@@ -5,6 +5,12 @@ const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => Array.from(document.querySelectorAll(selector));
 const IS_FILE_PREVIEW = location.protocol === 'file:';
 
+// Откуда берутся фоновые ролики. Через бэкенд — с корня сайта. Когда интерфейс
+// открыт файлом (режим показа: ничего не качается, всё на заглушках), рядом с
+// index.html кладётся папка videos, и путь должен быть относительным — иначе
+// браузер искал бы их в корне диска.
+const VIDEO_BASE = IS_FILE_PREVIEW ? 'videos/' : '/videos/';
+
 // ── Launcher display name ─────────────────────────────────────────────────────
 // Fixed brand name (no longer randomised). Change this one line to rebrand.
 const LAUNCHER_NAME = 'vulkan';
@@ -47,9 +53,10 @@ const PREVIEW_CFG = {
   useDownloadedModsLibrary: true,
   musicEnabled: true,
   musicVolume: 70,
-  lastMode: 'pulse',
+  lastTheme: 'vulkan',
   userName: 'Player',
   javaPath: '',
+  autoJava: true,
   msaClientId: '',
   curseforgeKey: '',
   modSource: 'modrinth',
@@ -133,11 +140,20 @@ const PREVIEW_BROWSER_MODS = [
 
 // Videos are served from the /videos/ endpoint (files next to JAR); no embedded fallbacks
 const PLAY_VIDEO_CANDIDATES = [
-  '/videos/pulsePLUS_play.mp4'
+  VIDEO_BASE + 'pulsePLUS_play.mp4'
 ];
 
 const MODS_VIDEO_CANDIDATES = [
-  '/videos/pulsePLUS_mods.mp4'
+  VIDEO_BASE + 'pulsePLUS_mods.mp4'
+];
+
+// Фон вкладки «Настройки». В поставке ролика для неё нет — его кладут в папку
+// данных рядом с остальными (см. videosDir в installer/main.js). Первый
+// найденный вариант и играет, поэтому в списке следом стоит ролик play: пока
+// своего файла нет, вкладка показывает его, а не остаётся без фона.
+const SETTINGS_VIDEO_CANDIDATES = [
+  VIDEO_BASE + 'pulsePLUS_settings.mp4',
+  VIDEO_BASE + 'pulsePLUS_play.mp4'
 ];
 
 const PREVIEW_TRACKS = [
@@ -155,7 +171,12 @@ let activeAccountId = '';
 let msaState = null;   // ожидающий вход Microsoft: код, ссылка и таймер опроса
 let mods = [];
 let selectedMod = null;
-let currentMode = 'pulse';
+/* Оформление. Раньше здесь была ещё и переменная режима: «vulkan» жёстко
+   ставил 1.21.4 с Fabric, «vanilla» давал свободный выбор версии и загрузчика.
+   Режим остался один — тот, что был у Vanilla, — поэтому режим больше не
+   переменная, а константа. */
+let currentTheme = 'vulkan';
+const PROFILE_MODE = 'vanilla';
 let currentTab = 'play';
 let currentMusicTab = 'bytebeat';
 let browserSearchTimer = null;
@@ -188,10 +209,21 @@ document.addEventListener('keydown', resumeAudioContextOnce, { capture: true });
 
 window.addEventListener('DOMContentLoaded', async () => {
   bindFallbackWindowButtons();
+  // Окно ely.by закрыли — скин там могли только что поменять. Молча: закрывают
+  // его и просто так, а тост на каждое закрытие был бы шумом.
+  if (window.pulse && typeof window.pulse.onElyByClosed === 'function') {
+    window.pulse.onElyByClosed(() => onElybyWindowClosed());
+  }
   setupAudioPlayers();
   setupBackgroundVideos();
+  // Ролики привязываются оба сразу, и оба начинают играть: слой вкладки «моды»
+  // в разметке скрыт, но скрытость его не останавливает. Решение по каждому
+  // слою принимается здесь и только здесь — дальше оно пересматривается при
+  // смене вкладки, режима, фокуса и сворачивании.
+  syncVideoPlayback();
   setupParallax();
   setupCursorBlur();
+  watchIdle();          // фон на паузу, если игрок отошёл
   setStaticLogo();
 
   // Язык переключается на лету, но статическая разметка с data-i18n — это
@@ -208,19 +240,38 @@ window.addEventListener('DOMContentLoaded', async () => {
   // Свёрнутое окно не должно декодировать видео и считать волну: Electron у нас
   // с отключённым троттлингом фона, сам он это не остановит
   document.addEventListener('visibilitychange', () => {
-    const videos = [$('#bgPlay'), $('#bgMods'), $('#bgFade')];
-    if (document.hidden) {
-      for (const v of videos) if (v) v.pause();
-    } else {
-      syncVideoPlayback();
-    }
+    syncVideoPlayback();
     if (window.FX && typeof window.FX.setPaused === 'function') window.FX.setPaused(document.hidden);
   });
+
+  // Окно потеряло фокус — это и есть «игрок ушёл в игру»: лаунчер остаётся
+  // открытым и уходит под окно игры. Скрытым он себя при этом не считает —
+  // троттлинг фона отключён (см. main.js), и на живой игре замерено
+  // document.hidden = false, visibility = "visible". Поэтому фокус слушаем
+  // отдельно. Ролики на паузу, звук не трогаем: троттлинг отключён как раз
+  // ради него. Обратно — по возвращении фокуса.
+  //
+  // Спрашиваем у главного процесса, а не у страницы: замер показал, что
+  // document.hasFocus() остаётся true, когда активное окно уже чужое, —
+  // на этом пауза и висела. Слушатели ниже остаются запасным путём для
+  // тестовых страниц, которые открывают в обычном браузере, без Electron.
+  //
+  // Начальное состояние берём «в фокусе», не глядя на ответ: запущенное окно
+  // может ещё не успеть стать активным, и по честному ответу фон замирал бы
+  // прямо на старте. Пауза — это реакция на потерю фокуса, а не на его
+  // отсутствие при открытии.
+  if (window.pulse && window.pulse.onFocusChange) {
+    window.pulse.onFocusChange((focused) => { windowFocused = focused; syncVideoPlayback(); });
+  } else {
+    windowFocused = document.hasFocus();
+    window.addEventListener('blur', () => { windowFocused = false; syncVideoPlayback(); });
+    window.addEventListener('focus', () => { windowFocused = true; syncVideoPlayback(); });
+  }
 
   await loadState();
   await loadVersions();
   applyStateToUi();
-  applyInitialModeFromUrl();
+  applyInitialThemeFromUrl();
   await ensureActiveLoader();
   await loadMods();
   await loadMusicState();
@@ -254,14 +305,14 @@ function loaderObject(familyKey, mcVersion, build, channel, recommended) {
 async function openCurrentFolder() {
   let dir = null;
   try {
-    const q = `mode=${encodeURIComponent(currentMode)}`
+    const q = `mode=${encodeURIComponent(PROFILE_MODE)}`
       + `&version=${encodeURIComponent(activeVersion())}`
       + `&loader=${encodeURIComponent(currentLoaderId() || '')}`;
     const info = await fetchJson(`/api/instance-dir?${q}`);
     if (info && info.dir) dir = info.dir;
   } catch (_) { /* покажем то, что есть: общую папку игры */ }
 
-  const fallback = cfg && cfg.paths && (currentMode === 'vanilla' ? cfg.paths.vanilla : cfg.paths.minecraft);
+  const fallback = cfg && cfg.paths && cfg.paths.vanilla;
   const target = dir || fallback || null;
 
   // Проводник умеет открывать только оболочка. В браузерной сборке (та, что без
@@ -281,18 +332,30 @@ async function openCurrentFolder() {
   }
 }
 
+/**
+ * Дописать заглушку метода, которого нет в window.pulse.
+ *
+ * Запись обёрнута в try: объект из contextBridge заморожен, и присваивание в
+ * него бросает. Ошибка тут унесла бы за собой весь bindFallbackWindowButtons,
+ * то есть разом все кнопки окна, — а нехватка одного метода такого не стоит.
+ */
+function fallbackPulse(name, fn) {
+  if (window.pulse && typeof window.pulse[name] === 'function') return;
+  try { window.pulse[name] = fn; } catch (_) { /* заморожен оболочкой */ }
+}
+
 function bindFallbackWindowButtons() {
   if (!window.pulse) window.pulse = {};
-  if (typeof window.pulse.openFolder !== 'function') window.pulse.openFolder = () => toast('Open folder works in Electron build', 'ok');
-  if (typeof window.pulse.minimize !== 'function') window.pulse.minimize = () => document.body.classList.toggle('preview-minimized');
-  if (typeof window.pulse.maximize !== 'function') window.pulse.maximize = async () => {
+  fallbackPulse('openFolder', () => toast('Open folder works in Electron build', 'ok'));
+  fallbackPulse('minimize', () => document.body.classList.toggle('preview-minimized'));
+  fallbackPulse('maximize', async () => {
     if (document.fullscreenElement) await document.exitFullscreen();
     else await document.documentElement.requestFullscreen().catch(() => toast('Fullscreen not available here', 'err'));
-  };
-  if (typeof window.pulse.close !== 'function') window.pulse.close = () => {
+  });
+  fallbackPulse('close', () => {
     window.close();
     setTimeout(() => { if (!window.closed) location.href = 'about:blank'; }, 100);
-  };
+  });
 }
 
 // Close the launcher with a short goodbye animation, then actually quit.
@@ -302,7 +365,7 @@ function closeLauncher() {
   _closing = true;
   const overlay = $('#goodbyeOverlay');
   const title = $('#goodbyeTitle');
-  if (title) title.textContent = `до встречи, ${cfg.userName || 'Player'}`;
+  if (title) title.textContent = t('bye.titleName', { name: cfg.userName || 'Player' });
   document.body.classList.add('closing');
   if (overlay) overlay.classList.add('show');
   // Let the goodbye animation play, then quit
@@ -325,8 +388,10 @@ function setupAudioPlayers() {
 }
 
 function setupBackgroundVideos() {
-  bindVideoCandidates($('#bgPlay'), PLAY_VIDEO_CANDIDATES);
-  bindVideoCandidates($('#bgMods'), MODS_VIDEO_CANDIDATES);
+  const sets = videoSetsFor(currentTheme);
+  bindVideoCandidates($('#bgPlay'), sets.play);
+  bindVideoCandidates($('#bgMods'), sets.mods);
+  bindVideoCandidates($('#bgSettings'), sets.settings);
 }
 
 function bindVideoCandidates(video, candidates) {
@@ -357,7 +422,10 @@ function bindVideoCandidates(video, candidates) {
   const onLoaded = () => {
     active = true;
     video.classList.remove('is-missing');
-    video.play().catch(() => {});
+    // Запускать или нет — решает syncVideoPlayback, и к моменту загрузки ролика
+    // решение уже принято: он мог оказаться скрытым слоем или прийтись на
+    // запущенную игру с окном лаунчера под ней.
+    if (video._pulseWanted !== false) video.play().catch(() => {});
   };
 
   video._pulseErrorHandler = tryNext;
@@ -372,6 +440,7 @@ function setupParallax() {
   const content = $('.content');
   const bgPlay = $('#bgPlay');
   const bgMods = $('#bgMods');
+  const bgSettings = $('#bgSettings');
   if (!shell || !content) return;
 
   let targetX = 0, targetY = 0;
@@ -409,7 +478,7 @@ function setupParallax() {
     // Лёгкое смещение контента (без тяжёлой 3D-перспективы на всём shell)
     content.style.transform = `translate3d(${(cx * 5).toFixed(1)}px, ${(cy * 3).toFixed(1)}px, 0)`;
     // Видео двигается в противоположную сторону — создаёт глубину
-    [bgPlay, bgMods].forEach((video) => {
+    [bgPlay, bgMods, bgSettings].forEach((video) => {
       if (!video) return;
       video.style.transform = `scale(1.06) translate3d(${(cx * -14).toFixed(1)}px, ${(cy * -9).toFixed(1)}px, 0)`;
     });
@@ -476,12 +545,6 @@ function setStaticLogo() {
   // Update titlebar span
   const titleEl = document.querySelector('.title');
   if (titleEl) titleEl.innerHTML = `<b>${escapeHtml(LAUNCHER_NAME)}</b> Launcher`;
-  // Update sidebar pulseLockCard label
-  const lockLabel = document.querySelector('#pulseLockCard .section-label');
-  if (lockLabel) lockLabel.textContent = LAUNCHER_NAME;
-  // Update the pulse mode switch button (was hard-coded "vulkan")
-  const pulseModeBtn = $('#pulseModeBtn');
-  if (pulseModeBtn) pulseModeBtn.textContent = LAUNCHER_NAME;
   // Update browser tab title
   document.title = `${LAUNCHER_NAME} Launcher`;
 }
@@ -534,13 +597,17 @@ function applyStateToUi() {
     ...cfg,
     paths: { ...PREVIEW_CFG.paths, ...(cfg.paths || {}) }
   };
-  currentMode = cfg.lastMode || 'pulse';
-  cfg.selectedVersion = '1.21.4';
-  cfg.pulseLoaderId ||= PREVIEW_CFG.pulseLoaderId;
+  currentTheme = cfg.lastTheme || 'vulkan';
+  /* Версия и загрузчик хранились парами: своя у режима чита, своя у Vanilla.
+     Режим один, поле одно. Старые значения из config.json переносим, чтобы у
+     тех, кто уже пользовался лаунчером, выбор не сбросился на умолчание. */
   cfg.vanillaVersion ||= PREVIEW_CFG.vanillaVersion;
   cfg.vanillaLoaderId ||= PREVIEW_CFG.vanillaLoaderId;
+  cfg.selectedVersion = cfg.vanillaVersion;
+  cfg.loaderId = cfg.vanillaLoaderId;
 
   $('#javaPath').value = cfg.javaPath || '';
+  $('#autoJava').checked = cfg.autoJava !== false;
   $('#ramSlider').value = cfg.ramMb || 2048;
   $('#autoUpdateMods').checked = !!cfg.autoUpdateMods;
   $('#autoDisableMods').checked = !!cfg.autoDisableIncompatibleMods;
@@ -555,7 +622,7 @@ function applyStateToUi() {
   applyActiveAccountToSidebar();
   updateRam($('#ramSlider').value);
   onMusicVolume(cfg.musicVolume ?? 70, false);
-  setMode(currentMode, false);
+  setTheme(currentTheme, false);
 }
 
 // ── Аккаунты ─────────────────────────────────────────────────────────────────
@@ -564,18 +631,339 @@ function activeAccount() {
   return accounts.find((a) => a.id === activeAccountId) || accounts[0] || null;
 }
 
+/**
+ * Голова игрока вместо буквы.
+ *
+ * Буква лежит не под картинкой, а поверх неё: фон рисуется за текстом, поэтому
+ * мало надеть фон — букву надо погасить. Отсюда класс `has-skin`, который и
+ * красит фон, и делает текст прозрачным. Гасим только по факту загрузки
+ * картинки, чтобы ник без скина (404) остался с буквой, а не с пустым квадратом.
+ */
+/**
+ * Метка версии скина для адреса картинки.
+ *
+ * Браузер кэширует по полному URL, а сервер отдаёт скин с Cache-Control на час.
+ * После сброса кэша на сервере старый адрес всё ещё указывал бы на старую
+ * картинку в памяти браузера, поэтому с этого момента ко всем адресам скина
+ * добавляется метка времени. Ноль означает «ничего не сбрасывали»: тогда
+ * адрес чистый и обычное кэширование работает.
+ */
+let skinBust = 0;
+
+function applySkinToAvatar(el, nick) {
+  if (!el) return;
+  // Токен — от гонки: при быстром переключении аккаунтов медленный ответ
+  // первого ника не должен перебить уже надетый скин второго.
+  const token = (el._skinToken || 0) + 1;
+  el._skinToken = token;
+  if (!nick) {
+    el.classList.remove('has-skin');
+    el.style.removeProperty('--skin');
+    return;
+  }
+  // Ник уходит в путь URL через encodeURIComponent, а разбирается с ним сервер:
+  // на некорректный он ответит 400, и класс не наденется.
+  const url = skinUrl(nick, false);
+  // Класс вешается по факту загрузки, а не сразу: буква гаснет только под
+  // настоящей головой. Иначе ник без скина дал бы пустой квадрат — ни буквы,
+  // ни головы. Картинка потом берётся из кэша браузера, повторного запроса нет.
+  const probe = new Image();
+  probe.onload = () => {
+    if (el._skinToken !== token) return;
+    el.style.setProperty('--skin', `url("${url}")`);
+    el.classList.add('has-skin');
+  };
+  probe.onerror = () => {
+    if (el._skinToken !== token) return;
+    el.classList.remove('has-skin');
+    el.style.removeProperty('--skin');
+  };
+  probe.src = url;
+}
+
+/** Адрес скина, плаща или их сброса. Метка версии — только после сброса кэша. */
+function skinUrl(nick, wantCape, action) {
+  const base = `${API}/api/skin/${encodeURIComponent(nick)}`;
+  const tail = action ? `/${action}` : (wantCape ? '/cape' : '');
+  return base + tail + (skinBust ? `?t=${skinBust}` : '');
+}
+
+/**
+ * Окно ely.by: регистрация, вход и загрузка скина.
+ *
+ * Наружу уходит ключ страницы, а не адрес: куда именно идти, решает окно, и
+ * произвольная навигация из страницы туда не просочится.
+ */
+function openElyBy(page) {
+  const which = page === 'login' ? 'login' : 'register';
+  if (window.pulse && typeof window.pulse.openElyBy === 'function') {
+    window.pulse.openElyBy(which);
+    return;
+  }
+  // В браузере окна нет — открываем вкладку, чтобы кнопка не молчала
+  window.open(`https://account.ely.by/${which}`, '_blank');
+}
+
+// ── ely.by: кто вошёл и что с этим делать ───────────────────────────────────
+//
+// Состояние входа спрашиваем у оболочки, а не у бэкенда: сессия сайта живёт в
+// партиции Chromium (cookie identity на домене ely.by), и Java её не видит.
+//
+// `known` — отдельный флаг, и он важен. Если спросить не удалось (нет оболочки
+// или ely.by не ответил), кнопки входа обязаны остаться на экране: спрятать их,
+// не зная наверняка, — значит отобрать у игрока единственный способ войти.
+
+let elyby = { known: false, loggedIn: false, nick: '', offline: false, busy: false };
+
+async function loadElyby() {
+  if (!window.pulse || typeof window.pulse.elybyState !== 'function') {
+    elyby = { known: false, loggedIn: false, nick: '', offline: false, busy: false };
+    return elyby;
+  }
+  try {
+    const st = await window.pulse.elybyState();
+    elyby = {
+      known: true,
+      loggedIn: !!(st && st.loggedIn),
+      nick: (st && st.nick) || '',
+      offline: !!(st && st.offline),
+      busy: false
+    };
+  } catch (_) {
+    // Спросили и не получили ответа — это «неизвестно», а не «не вошёл»
+    elyby = { known: false, loggedIn: false, nick: '', offline: true, busy: false };
+  }
+  return elyby;
+}
+
+/**
+ * Завести ник с ely.by обычным аккаунтом лаунчера.
+ *
+ * Без этого надевание уходит в пустоту: в списке такого ника нет, играть под
+ * ним нельзя, и увидеть новый скин негде. Профиль с тем же ником бэкенд
+ * повышает до ely.by, а не заводит второй строкой, — двух «propadar» в списке
+ * быть не должно.
+ *
+ * Возвращает true, только если список изменился: перерисовывать его на каждый
+ * вход в панель незачем.
+ */
+async function syncElybyAccount() {
+  if (!elyby.loggedIn || !elyby.nick) return false;
+  const nick = elyby.nick.toLowerCase();
+  if (accounts.some((a) => a.elyby && a.name.toLowerCase() === nick)) return false;
+  try {
+    setAccounts(await fetchJson('/api/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'add-elyby', name: elyby.nick })
+    }));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+/** Кнопка панели: обычная кнопка с классом ghost-btn. */
+function ghostBtn(text, onClick) {
+  const b = document.createElement('button');
+  b.className = 'ghost-btn';
+  b.textContent = text;
+  b.onclick = onClick;
+  return b;
+}
+
+function elybyHint(text) {
+  const d = document.createElement('div');
+  d.className = 'account-hint';
+  d.textContent = text;
+  return d;
+}
+
+/**
+ * Блок ely.by в панели аккаунтов.
+ *
+ * Пока входа нет — «Регистрация» и «Войти». Как только вошли, обе кнопки
+ * уходят с экрана: они уже сделали своё дело, а на их месте появляется ник —
+ * единственное, что игроку теперь нужно знать. Сессия кончилась (или её
+ * стёрли кнопкой «Выйти») — кнопки возвращаются, потому что вернуться к
+ * странице входа иначе неоткуда.
+ *
+ * Каталог скинов виден всегда: он публичный, смотреть можно и без входа.
+ */
+function renderElybyBlock() {
+  const host = $('#elybyBody');
+  if (!host) return;
+  host.textContent = '';
+
+  const state = document.createElement('div');
+  state.className = 'ely-state';
+  const dot = document.createElement('span');
+  dot.className = 'ely-dot' + (elyby.loggedIn ? ' ely-dot--on' : '');
+  state.append(dot);
+  if (elyby.loggedIn) {
+    state.append(document.createTextNode(t('acc.elyLoggedAs') + ' '));
+    const b = document.createElement('b');
+    b.textContent = elyby.nick;
+    state.append(b);
+  } else {
+    state.append(document.createTextNode(
+      t(elyby.offline ? 'acc.elyOffline' : 'acc.elyNotLogged')));
+  }
+  host.append(state);
+
+  const auth = document.createElement('div');
+  auth.className = 'account-add-row';
+  if (elyby.loggedIn) {
+    // «Сменить» ведёт на ту же страницу входа: там же меняют аккаунт
+    auth.append(ghostBtn(t('acc.elySwitch'), () => openElyBy('login')));
+    auth.append(ghostBtn(t('acc.elyLogout'), elybyLogout));
+  } else {
+    auth.append(ghostBtn(t('acc.elyRegister'), () => openElyBy('register')));
+    auth.append(ghostBtn(t('acc.elyLogin'), () => openElyBy('login')));
+  }
+  host.append(auth);
+
+  const actions = document.createElement('div');
+  actions.className = 'account-add-row';
+  actions.append(ghostBtn(t('acc.skinsOpen'), () => openSkins()));
+  const nick = elyby.loggedIn && elyby.nick ? elyby.nick : null;
+  actions.append(ghostBtn(t('acc.skinRefresh'), () => refreshSkinOf(nick, false)));
+  host.append(actions);
+
+  host.append(elybyHint(elyby.loggedIn ? t('acc.elyHintIn') : t('acc.elyHint')));
+  host.append(elybyHint(t('acc.skinHint')));
+}
+
+/** Выход: стираем сессию окна и возвращаем кнопки входа. */
+async function elybyLogout() {
+  if (!confirm(t('acc.elyLogoutAsk'))) return;
+  if (window.pulse && typeof window.pulse.elybyLogout === 'function') {
+    await window.pulse.elybyLogout();
+  }
+  // Отметка ely.by на профиле больше не правда: сессии нет
+  try {
+    setAccounts(await fetchJson('/api/accounts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'forget-elyby' })
+    }));
+  } catch (_) { /* не вышло — покажем состояние как есть */ }
+  await loadElyby();
+  renderElybyBlock();
+  renderAccounts();
+  toast(t('acc.elyLoggedOut'), 'ok');
+}
+
+/**
+ * Окно ely.by закрыли.
+ *
+ * Молча: закрывают его и просто так, а тост на каждое закрытие — шум. Но скин
+ * там могли только что поменять, поэтому перечитываем и состояние входа (ник
+ * мог появиться впервые), и скин именно того ника, что стоит на ely.by, — а не
+ * активного аккаунта: это разные люди, если игрок выбрал другой профиль.
+ */
+async function onElybyWindowClosed() {
+  // Скин там могли только что поменять, поэтому перечитываем и состояние входа
+  // (ник мог появиться впервые), и скин именно того ника, что стоит на ely.by,
+  // — а не активного аккаунта: это разные люди, если выбран другой профиль.
+  const was = elyby.nick;   // ник до перечитывания: окно могли и не логинить
+  await elybyRefresh();
+  await refreshSkinOf(elyby.loggedIn ? elyby.nick : was, true);
+}
+
+/**
+ * Забыть скачанный скин ника и перечитать его.
+ *
+ * Нужно после смены скина на сайте: SkinService держит удачный ответ сутки, а
+ * «ник не найден» — час. Без сброса свежий скин не появился бы вовсе, и это
+ * выглядело бы как «фича не работает».
+ *
+ * Ник параметром, а не из активного аккаунта: скин меняют на ely.by, а играть
+ * при этом могут под другим профилем. Сбросить надо тот ник, который меняли.
+ */
+async function refreshSkinOf(nick, silent) {
+  const name = (nick || '').trim();
+  if (!name) {
+    if (!silent) toast(t('acc.skinNoAccount'), 'err');
+    return false;
+  }
+  try {
+    const r = await fetch(skinUrl(name, false, 'refresh'), { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (e) {
+    if (!silent) toast(t('acc.skinFailed'), 'err');
+    return false;
+  }
+  // Метка версии растёт всегда, а не только когда ник сейчас на экране: без неё
+  // браузер отдал бы свою копию по старому адресу при первом же переключении
+  skinBust = Date.now();
+  applyActiveAccountToSidebar();
+  if ($('#accountPanel')?.dataset.open === 'true') renderAccounts();
+  if (!silent) toast(t('acc.skinUpdated'), 'ok');
+  return true;
+}
+
+/** То же для активного аккаунта — кнопка «Обновить скин» без ника. */
+function refreshSkin(silent) {
+  const acc = activeAccount();
+  return refreshSkinOf(acc ? acc.name : '', silent);
+}
+
+/**
+ * Записать нику скин, который игрок только что надел в витрине.
+ *
+ * Почему не перечитать. Скин по нику ely.by отдаёт с длинной задержкой:
+ * проверено живьём — учётка приняла новый скин сразу, а файл по нику отдавал
+ * прежний ещё шесть минут. Перечитав сразу после надевания, мы запомнили бы
+ * прежний скин на сутки — то есть «надел, а не поменялось» осталось бы на месте
+ * уже по другой причине. Поэтому отдаём серверу хеш — ту самую картинку, которую
+ * игрок выбрал и которую он только что видел в сетке.
+ *
+ * Отказ (409 — картинки у нас нет) не беда: откатываемся на обычное чтение.
+ */
+async function adoptWornSkin(nick, hash) {
+  const name = (nick || '').trim();
+  if (!name || !hash) return refreshSkinOf(name, true);
+  try {
+    // Адрес собираем сами, а не через skinUrl: та дописывает метку версии через
+    // «?», и склейка с «&hash=» дала бы битый адрес, пока метки ещё нет
+    const url = `${API}/api/skin/${encodeURIComponent(name)}/wear`
+              + `?hash=${encodeURIComponent(hash)}`;
+    const r = await fetch(url, { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+  } catch (_) {
+    return refreshSkinOf(name, true);
+  }
+  // Метка версии растёт так же, как у перечитывания: без неё браузер отдал бы
+  // свою копию картинки по старому адресу
+  skinBust = Date.now();
+  applyActiveAccountToSidebar();
+  if ($('#accountPanel')?.dataset.open === 'true') renderAccounts();
+  return true;
+}
+
 /** Сайдбар показывает активный аккаунт; старое cfg.userName — запасной вариант. */
 function applyActiveAccountToSidebar() {
   const acc = activeAccount();
   const fallback = cfg.userName && cfg.userName.trim() ? cfg.userName.trim() : 'Player';
   const name = acc ? acc.name : fallback;
   const initial = acc && acc.initial ? acc.initial : name.charAt(0).toUpperCase();
-  const kind = acc && acc.microsoft ? 'Microsoft' : 'локальный профиль';
+  const kind = acc && acc.microsoft ? 'Microsoft'
+             : acc && acc.elyby     ? t('acc.kindElyby')
+                                    : t('sidebar.localProfile');
 
   const profileName = $('#profileName');
   if (profileName) profileName.textContent = name;
   const avatar = $('#avatar');
-  if (avatar) avatar.textContent = initial;
+  if (avatar) {
+    avatar.textContent = initial;
+    // Без аккаунта скина нет: иначе на запасном «Player» подтянулся бы чужой
+    // скин одноимённого игрока
+    applySkinToAvatar(avatar, acc ? acc.name : null);
+  }
+  // Тот же скин носит и Стив в диораме. FX может быть ещё не поднят — тогда
+  // ник запомнится и применится, как только диорама догрузит текстуры.
+  if (window.FX) window.FX.setPlayerSkin(acc ? acc.name : null, skinBust);
   const accountName = $('#accountName');
   if (accountName) accountName.textContent = name;
   const accountState = $('#accountState');
@@ -595,11 +983,42 @@ function openAccounts() {
   const panel = $('#accountPanel');
   if (!panel) return;
   renderAccounts();
+  // Состояние входа — из прошлого раза, чтобы блок не мигал пустотой на
+  // открытии; сразу после этого уточняем у ely.by
+  renderElybyBlock();
+  elybyRefresh();
   panel.dataset.open = 'true';
   const scrim = $('#accountScrim');
   if (scrim) scrim.classList.add('open');
   replayStagger($('#accountStagger'));
   refreshFxObstacles();   // кнопки панели только что появились на экране
+}
+
+/**
+ * Спросить у оболочки, кто вошёл, и привести список аккаунтов в соответствие.
+ *
+ * Отдельной функцией, потому что зовут её из двух мест: открытие панели и
+ * закрытие окна ely.by.
+ */
+async function elybyRefresh() {
+  await loadElyby();
+
+  // Сессия могла кончиться сама — cookie живёт своим сроком. Тогда значок
+  // «ely.by» на строке перестал быть правдой, и его надо снять. Но только
+  // когда ответ ТОЧНЫЙ: если ely.by не ответил, мы не знаем ничего и трогать
+  // отметку не вправе.
+  if (elyby.known && !elyby.loggedIn && accounts.some((a) => a.elyby)) {
+    try {
+      setAccounts(await fetchJson('/api/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'forget-elyby' })
+      }));
+    } catch (_) { /* не вышло — покажем как есть, это не повод падать */ }
+  }
+
+  renderElybyBlock();
+  if (await syncElybyAccount()) renderAccounts();
 }
 
 function closeAccounts() {
@@ -620,19 +1039,20 @@ function renderAccounts() {
   if (!accounts.length) {
     const empty = document.createElement('div');
     empty.className = 'account-empty';
-    empty.textContent = 'Аккаунтов пока нет';
+    empty.textContent = t('acc.empty');
     list.append(empty);
   }
 
   for (const acc of accounts) {
     const row = document.createElement('div');
     row.className = `account-row${acc.id === activeAccountId ? ' active' : ''}`;
-    row.title = acc.id === activeAccountId ? 'Активный аккаунт' : 'Переключиться на этот аккаунт';
+    row.title = acc.id === activeAccountId ? t('acc.active') : t('acc.switchTo');
     row.onclick = () => selectAccount(acc.id);
 
     const avatar = document.createElement('div');
     avatar.className = 'avatar';
     avatar.textContent = acc.initial || acc.name.charAt(0).toUpperCase();
+    applySkinToAvatar(avatar, acc.name);
 
     const main = document.createElement('div');
     main.className = 'account-row-main';
@@ -641,12 +1061,14 @@ function renderAccounts() {
     nameEl.textContent = acc.name;
     const metaEl = document.createElement('div');
     metaEl.className = 'account-row-meta';
-    metaEl.textContent = acc.microsoft ? 'вход Microsoft' : 'офлайн-профиль';
+    metaEl.textContent = acc.microsoft ? t('acc.kindMicrosoft')
+                       : acc.elyby     ? t('acc.kindElyby')
+                                       : t('acc.kindOffline');
     main.append(nameEl, metaEl);
 
     const badge = document.createElement('span');
-    badge.className = `account-badge ${acc.microsoft ? 'msa' : 'offline'}`;
-    badge.textContent = acc.microsoft ? 'MSA' : 'офлайн';
+    badge.className = `account-badge ${acc.microsoft ? 'msa' : acc.elyby ? 'elyby' : 'offline'}`;
+    badge.textContent = acc.microsoft ? 'MSA' : acc.elyby ? 'ely.by' : t('acc.badgeOffline');
 
     row.append(avatar, main, badge);
 
@@ -655,7 +1077,7 @@ function renderAccounts() {
       const remove = document.createElement('button');
       remove.className = 'account-remove';
       remove.textContent = '✕';
-      remove.title = 'Удалить аккаунт';
+      remove.title = t('acc.remove');
       remove.onclick = (event) => {
         event.stopPropagation();
         removeAccount(acc.id);
@@ -680,28 +1102,27 @@ function renderMsaBlock() {
 
     const steps = document.createElement('div');
     steps.className = 'msa-steps';
-    steps.append(document.createTextNode('Открой '));
-    const link = document.createElement('a');
-    link.href = '#';
-    link.textContent = msaState.host || 'microsoft.com/link';
-    link.onclick = (e) => { e.preventDefault(); openMsaLink(); };
-    steps.append(link, document.createTextNode(' и введи этот код. Окно можно не закрывать — вход подхватится сам.'));
+    steps.innerHTML = t('acc.msaSteps', {
+      url: `<a href="#">${escapeHtml(msaState.host || 'microsoft.com/link')}</a>`
+    });
+    const link = steps.querySelector('a');
+    if (link) link.onclick = (e) => { e.preventDefault(); openMsaLink(); };
 
     const status = document.createElement('div');
     status.className = 'msa-status';
     const dot = document.createElement('span');
     dot.className = 'msa-dot';
-    status.append(dot, document.createTextNode('Ждём подтверждения…'));
+    status.append(dot, document.createTextNode(t('acc.msaWaiting')));
 
     const actions = document.createElement('div');
     actions.className = 'msa-actions';
     const openBtn = document.createElement('button');
     openBtn.className = 'ghost-btn';
-    openBtn.textContent = 'Открыть страницу';
+    openBtn.textContent = t('acc.msaOpenPage');
     openBtn.onclick = openMsaLink;
     const cancelBtn = document.createElement('button');
     cancelBtn.className = 'ghost-btn';
-    cancelBtn.textContent = 'Отменить';
+    cancelBtn.textContent = t('acc.msaCancel');
     cancelBtn.onclick = cancelMsaLogin;
     actions.append(openBtn, cancelBtn);
 
@@ -714,23 +1135,23 @@ function renderMsaBlock() {
   const input = document.createElement('input');
   input.id = 'msaClientIdInput';
   input.className = 'text-input';
-  input.placeholder = 'Client ID приложения Azure';
+  input.placeholder = t('acc.clientId');
   input.value = cfg.msaClientId || '';   // значение, а не атрибут — так кавычки не ломают разметку
   const saveBtn = document.createElement('button');
   saveBtn.className = 'ghost-btn';
-  saveBtn.textContent = 'Сохранить';
+  saveBtn.textContent = t('common.save');
   saveBtn.onclick = saveMsaClientId;
   row.append(input, saveBtn);
 
   const hint = document.createElement('div');
   hint.className = 'account-hint';
-  hint.textContent = 'Публичный клиент Azure, секрет не нужен. В приложении должно быть включено «Allow public client flows».';
+  hint.textContent = t('acc.msHint');
 
   const actions = document.createElement('div');
   actions.className = 'msa-actions';
   const loginBtn = document.createElement('button');
   loginBtn.className = 'launch-btn small';
-  loginBtn.textContent = 'Войти через Microsoft';
+  loginBtn.textContent = t('acc.msLoginAction');
   loginBtn.disabled = !(cfg.msaClientId && cfg.msaClientId.trim());
   loginBtn.onclick = startMicrosoftLogin;
   actions.append(loginBtn);
@@ -746,7 +1167,7 @@ async function addOfflineAccount() {
   const input = $('#accountNameInput');
   const name = input ? input.value.trim() : '';
   if (!name) {
-    toast('Впиши ник', 'err');
+    toast(t('acc.enterNick'), 'err');
     return;
   }
   try {
@@ -757,9 +1178,9 @@ async function addOfflineAccount() {
     }));
     if (input) input.value = '';
     const acc = activeAccount();
-    toast(acc ? `Аккаунт ${acc.name} добавлен` : 'Аккаунт добавлен', 'ok');
+    toast(acc ? t('acc.addedAs', { name: acc.name }) : t('acc.added'), 'ok');
   } catch (error) {
-    toast(`Не вышло: ${error.message}`, 'err');
+    toast(t('common.failed', { message: error.message }), 'err');
   }
 }
 
@@ -772,15 +1193,15 @@ async function selectAccount(id) {
       body: JSON.stringify({ action: 'select', id })
     }));
     const acc = activeAccount();
-    if (acc) toast(`Играем как ${acc.name}`, 'ok');
+    if (acc) toast(t('acc.playingAs', { name: acc.name }), 'ok');
   } catch (error) {
-    toast(`Не вышло переключиться: ${error.message}`, 'err');
+    toast(t('acc.switchFailed', { message: error.message }), 'err');
   }
 }
 
 async function removeAccount(id) {
   const acc = accounts.find((a) => a.id === id);
-  if (acc && !confirm(`Удалить аккаунт «${acc.name}»?`)) return;
+  if (acc && !confirm(t('acc.removeAsk', { name: acc.name }))) return;
   try {
     setAccounts(await fetchJson('/api/accounts', {
       method: 'POST',
@@ -788,7 +1209,7 @@ async function removeAccount(id) {
       body: JSON.stringify({ action: 'remove', id })
     }));
   } catch (error) {
-    toast(`Не вышло удалить: ${error.message}`, 'err');
+    toast(t('acc.removeFailed', { message: error.message }), 'err');
   }
 }
 
@@ -802,9 +1223,9 @@ async function saveMsaClientId() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ msaClientId: cfg.msaClientId })
     });
-    toast('Client ID сохранён', 'ok');
+    toast(t('acc.clientIdSaved'), 'ok');
   } catch (error) {
-    toast(`Не вышло сохранить: ${error.message}`, 'err');
+    toast(t('acc.saveFailed', { message: error.message }), 'err');
   }
   renderMsaBlock();
 }
@@ -841,7 +1262,7 @@ async function pollMicrosoftLogin() {
   if (!msaState) return;
   if (msaState.expiresAt && Date.now() > msaState.expiresAt) {
     cancelMsaLogin();
-    toast('Код истёк — начни вход заново', 'err');
+    toast(t('acc.msaExpired'), 'err');
     return;
   }
   try {
@@ -853,7 +1274,7 @@ async function pollMicrosoftLogin() {
     msaState = null;
     setAccounts(res);
     renderMsaBlock();
-    toast(res.name ? `Вошли как ${res.name}` : 'Вход выполнен', 'ok');
+    toast(res.name ? t('acc.msaLoggedAs', { name: res.name }) : t('acc.msaDone'), 'ok');
   } catch (error) {
     msaState = null;
     renderMsaBlock();
@@ -879,7 +1300,6 @@ function openMsaLink() {
 }
 
 function renderVersionList() {
-  if (currentMode !== 'vanilla') return;
   const list = $('#versionList');
   list.innerHTML = '';
   const currentVersion = activeVersion();
@@ -927,16 +1347,15 @@ function renderVanillaVersionSelect() {
 }
 
 function activeVersion() {
-  return currentMode === 'vanilla' ? cfg.vanillaVersion : '1.21.4';
+  return cfg.vanillaVersion;
 }
 
 function currentLoaderId() {
-  return currentMode === 'vanilla' ? cfg.vanillaLoaderId : (cfg.pulseLoaderId || PREVIEW_CFG.pulseLoaderId);
+  return cfg.vanillaLoaderId;
 }
 
 function setCurrentLoaderId(loaderId) {
-  if (currentMode === 'vanilla') cfg.vanillaLoaderId = loaderId;
-  else cfg.pulseLoaderId = loaderId;
+  cfg.vanillaLoaderId = loaderId;
 }
 
 function parseLoaderId(loaderId) {
@@ -958,10 +1377,7 @@ function activeLoader() {
   return parseLoaderId(currentLoaderId()) || loaderObject('fabric', '1.21.4', '0.16.10', '', true);
 }
 
-async function availableLoaders(versionId, mode = currentMode) {
-  if (mode === 'pulse') {
-    return [loaderObject('fabric', '1.21.4', '0.16.10', '', true)];
-  }
+async function availableLoaders(versionId) {
   const cacheKey = versionId;
   if (dynamicLoaderCache.has(cacheKey)) return dynamicLoaderCache.get(cacheKey);
   if (IS_FILE_PREVIEW) {
@@ -982,7 +1398,7 @@ async function availableLoaders(versionId, mode = currentMode) {
 }
 
 async function ensureActiveLoader() {
-  const loaders = await availableLoaders(activeVersion(), currentMode);
+  const loaders = await availableLoaders(activeVersion());
   const current = parseLoaderId(currentLoaderId());
   const exactExists = loaders.some((loader) => loader.id === currentLoaderId());
   if (!exactExists) {
@@ -1002,8 +1418,7 @@ async function ensureActiveLoader() {
   await updateVersionDependentUi();
 }
 
-function defaultLoaderFor(versionId, mode, loaders) {
-  if (mode === 'pulse') return PREVIEW_CFG.pulseLoaderId;
+function defaultLoaderFor(versionId, loaders) {
   /* Собранное важнее «рекомендованного». Каталог предлагает самую свежую
      сборку семьи, и по умолчанию выбор падал на неё — то есть на новую
      загрузку поверх уже готовой. Ваниллу сюда не пускаем: она «собрана»
@@ -1016,15 +1431,14 @@ function defaultLoaderFor(versionId, mode, loaders) {
 }
 
 async function syncSelectedVersion(versionId, save) {
-  if (currentMode !== 'vanilla') return;
   cfg.vanillaVersion = versionId;
   // Рисуем сразу: подсветка выбора обязана отзываться на клик мгновенно,
   // а не после похода в сеть за списком загрузчиков. Ниже список
   // перерисовывается ещё раз — уже с настоящим именем загрузчика,
   // которое до ответа сервера неизвестно.
   renderVersionList();
-  const loaders = await availableLoaders(versionId, 'vanilla');
-  cfg.vanillaLoaderId = defaultLoaderFor(versionId, 'vanilla', loaders);
+  const loaders = await availableLoaders(versionId);
+  cfg.vanillaLoaderId = defaultLoaderFor(versionId, loaders);
   renderVersionList();
   await updateVersionDependentUi();
   await loadMods();
@@ -1039,17 +1453,15 @@ async function syncVanillaVersion(versionId) {
 async function updateVersionDependentUi() {
   const versionId = activeVersion();
   const selectedLoader = activeLoader();
-  const family = currentMode === 'vanilla' ? selectedLoader.family : 'Fabric';
+  const family = selectedLoader.family;
   $('#brandVersion').textContent = `${versionId} - ${family}`;
   $('#selectedVersionLabel').textContent = versionId;
   $('#selectedLoaderVersionLabel').textContent = selectedLoader.label;
   $('#loaderLabel').textContent = family;
-  $('#loaderSubtext').textContent = currentMode === 'vanilla'
-    ? `${selectedLoader.label} - ${versionId}`
-    : `Fabric 1.21.4 - locked ${LAUNCHER_NAME} build`;
-  $('#selectedModeLabel').textContent = currentMode === 'vanilla' ? 'Vanilla' : LAUNCHER_NAME;
-  $('#musicFolderLabel').textContent = `music folder: ${cfg.paths.music}`;
-  $('#brandVersion').textContent = `${versionId} - ${currentMode === 'vanilla' ? selectedLoader.family : 'Fabric'}`;
+  $('#loaderSubtext').textContent = `${selectedLoader.label} - ${versionId}`;
+  $('#selectedModeLabel').textContent = LAUNCHER_NAME;
+  $('#musicFolderLabel').textContent = t('music.folderPath', { path: cfg.paths.music });
+  $('#brandVersion').textContent = `${versionId} - ${selectedLoader.family}`;
   await renderLoaderDrawer();
   await renderInlineLoaderList();
   renderVersionList();
@@ -1060,9 +1472,8 @@ async function updateVersionDependentUi() {
 async function renderLoaderDrawer() {
   const drawer = $('#loaderDrawer');
   drawer.innerHTML = '';
-  if (currentMode !== 'vanilla') return;
   const versionId = activeVersion();
-  const loaders = await availableLoaders(versionId, currentMode);
+  const loaders = await availableLoaders(versionId);
   loaders.forEach((loader, index) => {
     const button = document.createElement('button');
     button.className = `loader-option${currentLoaderId() === loader.id ? ' active' : ''}${loader.installed ? ' installed' : ''}`;
@@ -1078,8 +1489,7 @@ async function renderLoaderDrawer() {
 async function renderInlineLoaderList() {
   const host = $('#inlineLoaderList');
   host.innerHTML = '';
-  if (currentMode !== 'vanilla') return;
-  const loaders = await availableLoaders(activeVersion(), currentMode);
+  const loaders = await availableLoaders(activeVersion());
   loaders.forEach((loader) => {
     const button = document.createElement('button');
     button.className = `inline-loader-chip${currentLoaderId() === loader.id ? ' active' : ''}${loader.installed ? ' installed' : ''}`;
@@ -1097,7 +1507,6 @@ function toggleLoaderDrawer() {
 }
 
 async function selectLoader(loaderId) {
-  if (currentMode !== 'vanilla' && loaderId !== PREVIEW_CFG.pulseLoaderId) return;
   setCurrentLoaderId(loaderId);
   await updateVersionDependentUi();
   await loadBrowserMods($('#modsSearch')?.value || '');
@@ -1105,11 +1514,22 @@ async function selectLoader(loaderId) {
 }
 
 const VANILLA_PLAY_VIDEOS = [
-  '/videos/minecrat_play.mp4'
+  VIDEO_BASE + 'minecrat_play.mp4'
 ];
 const VANILLA_MODS_VIDEOS = [
-  '/videos/minecraft_mods.mp4'
+  VIDEO_BASE + 'minecraft_mods.mp4'
 ];
+const VANILLA_SETTINGS_VIDEOS = [
+  VIDEO_BASE + 'minecraft_settings.mp4',
+  VIDEO_BASE + 'minecrat_play.mp4'
+];
+
+/** Наборы фонов для оформления: по одному на вкладку. */
+function videoSetsFor(theme) {
+  return theme === 'vulkan'
+    ? { play: PLAY_VIDEO_CANDIDATES, mods: MODS_VIDEO_CANDIDATES, settings: SETTINGS_VIDEO_CANDIDATES }
+    : { play: VANILLA_PLAY_VIDEOS, mods: VANILLA_MODS_VIDEOS, settings: VANILLA_SETTINGS_VIDEOS };
+}
 
 // True crossfade: the incoming background plays on a top layer (#bgFade) and fades
 // in OVER the current one, then we commit it to the base layers — both are visible
@@ -1123,8 +1543,8 @@ const VANILLA_MODS_VIDEOS = [
 let _videoFadeBusy = false;
 let _pendingVideo = null;
 
-async function switchVideoWithCrossfade(newPlayCandidates, newModsCandidates) {
-  _pendingVideo = { play: newPlayCandidates, mods: newModsCandidates };
+async function switchVideoWithCrossfade(sets) {
+  _pendingVideo = sets;
   if (_videoFadeBusy) return;          // the running loop will pick up the newest request
 
   _videoFadeBusy = true;
@@ -1132,28 +1552,32 @@ async function switchVideoWithCrossfade(newPlayCandidates, newModsCandidates) {
     while (_pendingVideo) {
       const job = _pendingVideo;
       _pendingVideo = null;
-      await runVideoCrossfade(job.play, job.mods);
+      await runVideoCrossfade(job);
     }
   } finally {
     _videoFadeBusy = false;
     // A request that landed between the loop's check and the flag reset
-    if (_pendingVideo) void switchVideoWithCrossfade(_pendingVideo.play, _pendingVideo.mods);
+    if (_pendingVideo) void switchVideoWithCrossfade(_pendingVideo);
   }
 }
 
-async function runVideoCrossfade(newPlayCandidates, newModsCandidates) {
+async function runVideoCrossfade(sets) {
   const fade = $('#bgFade');
   if (!fade) {
-    bindVideoCandidates($('#bgPlay'), newPlayCandidates);
-    bindVideoCandidates($('#bgMods'), newModsCandidates);
+    bindVideoCandidates($('#bgPlay'), sets.play);
+    bindVideoCandidates($('#bgMods'), sets.mods);
+    bindVideoCandidates($('#bgSettings'), sets.settings);
     return;
   }
 
-  // Which base layer is currently shown (mods tab shows #bgMods, else #bgPlay)
-  const showingMods = currentTab === 'mods';
-  const targetCandidates = showingMods ? newModsCandidates : newPlayCandidates;
+  // Which base layer is currently shown (each tab has its own background)
+  const targetCandidates = sets[currentTab] || sets.play;
 
-  // Load the incoming video onto the fade layer and start playing it
+  // Load the incoming video onto the fade layer and start playing it.
+  // Решение «играть» ставим до привязки: слой перехода по умолчанию на паузе
+  // (см. syncVideoPlayback), и без этого метка _pulseWanted запретила бы запуск
+  // ровно в тот единственный момент, когда слой нужен.
+  fade._pulseWanted = true;
   bindVideoCandidates(fade, targetCandidates);
 
   // Give it a beat to start decoding a frame. If a newer switch landed meanwhile,
@@ -1165,94 +1589,212 @@ async function runVideoCrossfade(newPlayCandidates, newModsCandidates) {
   await new Promise(r => setTimeout(r, 300)); // matches CSS .28s + small buffer
 
   // Commit the new sources to the base layers underneath, then hide the fade layer.
-  bindVideoCandidates($('#bgPlay'), newPlayCandidates);
-  bindVideoCandidates($('#bgMods'), newModsCandidates);
+  bindVideoCandidates($('#bgPlay'), sets.play);
+  bindVideoCandidates($('#bgMods'), sets.mods);
+  bindVideoCandidates($('#bgSettings'), sets.settings);
+  // Переход мог застать падение вкладки: тогда один из слоёв уехал вниз и
+  // остался там. Возвращаем раскладку вкладок, иначе нужный фон не покажется.
+  applyTabBackgrounds(currentTab);
   await new Promise(r => setTimeout(r, 20));
   fade.classList.remove('show');
   syncVideoPlayback();   // слой кроссфейда больше не нужен — ставим на паузу
 }
 
-function setMode(mode, persist = true) {
-  currentMode = mode;
-  cfg.lastMode = mode;
-  if (mode === 'pulse') {
-    cfg.selectedVersion = '1.21.4';
-    cfg.pulseLoaderId = PREVIEW_CFG.pulseLoaderId;
-  }
-  document.body.classList.toggle('vanilla-mode', mode === 'vanilla');
-  $('#pulseModeBtn').classList.toggle('active', mode === 'pulse');
-  $('#vanillaModeBtn').classList.toggle('active', mode === 'vanilla');
-  $('#vanillaModeBtn').classList.toggle('vanilla-active', mode === 'vanilla');
+function setTheme(theme, persist = true) {
+  currentTheme = theme;
+  cfg.lastTheme = theme;
+  document.body.classList.toggle('theme-vanilla', theme === 'vanilla');
+  $('#themeVulkanBtn').classList.toggle('active', theme === 'vulkan');
+  $('#themeVanillaBtn').classList.toggle('active', theme === 'vanilla');
 
-  // Switch background videos with crossfade transition
-  const playCandidates = mode === 'vanilla' ? VANILLA_PLAY_VIDEOS : PLAY_VIDEO_CANDIDATES;
-  const modsCandidates = mode === 'vanilla' ? VANILLA_MODS_VIDEOS : MODS_VIDEO_CANDIDATES;
+  // Фоновые ролики — часть оформления, поэтому меняются вместе с ним.
+  // Явная смена темы идёт с плавным переходом, первая отрисовка — без него.
+  const sets = videoSetsFor(theme);
   if (persist) {
-    // Only animate on explicit user switch, not during initial load
-    switchVideoWithCrossfade(playCandidates, modsCandidates);
+    switchVideoWithCrossfade(sets);
   } else {
-    bindVideoCandidates($('#bgPlay'), playCandidates);
-    bindVideoCandidates($('#bgMods'), modsCandidates);
+    bindVideoCandidates($('#bgPlay'), sets.play);
+    bindVideoCandidates($('#bgMods'), sets.mods);
+    bindVideoCandidates($('#bgSettings'), sets.settings);
+    applyTabBackgrounds(currentTab);
     syncVideoPlayback();
   }
 
-  const isVanilla = mode === 'vanilla';
-  $('#heroBadge').textContent = isVanilla ? t('hero.badge.vanilla') : t('hero.ready');
-  $('#heroTitle').textContent = isVanilla ? t('hero.title.vanilla') : t('hero.title.pulse');
-  $('#heroText').textContent = isVanilla
-    ? t('hero.text.vanilla')
-    : t('hero.text.pulse', { name: LAUNCHER_NAME, version: '1.21.4' });
-  $('#launchBtnLabel').textContent = isVanilla ? t('hero.launch.vanilla') : t('hero.launch.pulse');
+  $('#heroBadge').textContent = t('hero.badge');
+  $('#heroTitle').textContent = t('hero.title');
+  $('#heroText').textContent = t('hero.text', { name: LAUNCHER_NAME });
+  $('#launchBtnLabel').textContent = t('hero.launch');
 
-  // Update window title via Electron IPC
+  // Заголовок окна и иконка в панели задач тоже оформление: фиолетовая небула
+  // у vulkan, зелёный луг у Vanilla.
   if (window.pulse && typeof window.pulse.setTitle === 'function') {
-    const title = isVanilla
-      ? `${LAUNCHER_NAME} — Vanilla`
-      : `${LAUNCHER_NAME} launcher`;
-    window.pulse.setTitle(title);
+    window.pulse.setTitle(`${LAUNCHER_NAME} launcher`);
   }
-
-  // Window / taskbar icon follows the mode: violet nebula for the client, green for Vanilla
   if (window.pulse && typeof window.pulse.setMode === 'function') {
-    window.pulse.setMode(mode);
+    window.pulse.setMode(theme);
   }
 
-  void updateVersionDependentUi();
-  if (!isVanilla) $('#loaderDrawer').classList.remove('open');
   if (persist) saveSettings();
-  refreshFxObstacles();   // в vanilla-режиме часть блоков появляется, часть исчезает
-  // Полоска в сайдбаре и фон на кнопках меняют вид вместе с режимом
+  refreshFxObstacles();   // у тем разные препятствия: часть блоков появляется, часть исчезает
+  // Полоска в сайдбаре и фон на кнопках меняют вид вместе с темой
   if (window.FX && typeof window.FX.refreshMode === 'function') window.FX.refreshMode();
 }
 
-// A shortcut can open the launcher straight into a mode: --mode=vanilla becomes
-// ?mode=vanilla on the backend URL. Applied without the crossfade so the first
-// paint never animates.
-function applyInitialModeFromUrl() {
+// Ярлык может открыть лаунчер сразу в нужном оформлении: --mode=vanilla
+// превращается в ?mode=vanilla в адресе. Применяется без плавного перехода,
+// чтобы первая отрисовка не анимировалась.
+function applyInitialThemeFromUrl() {
   const requested = new URLSearchParams(location.search).get('mode');
-  if (requested !== 'vanilla' && requested !== 'pulse') return;
-  if (requested === currentMode) return;
-  setMode(requested, false);
+  if (requested !== 'vanilla' && requested !== 'vulkan') return;
+  if (requested === currentTheme) return;
+  setTheme(requested, false);
   saveSettings();
 }
 
 // Скрытое видео продолжает декодироваться: opacity:0 его не останавливает.
 // Два ролика 1080p60, крутящиеся вхолостую, — заметная нагрузка на слабой машине,
 // поэтому всё невидимое ставим на паузу, а нужное возвращаем к жизни.
+//
+// Играет видео или нет, решает только эта функция: она же запоминает решение в
+// _pulseWanted, и по нему запускается ролик, когда догрузится (см. onLoaded).
+// Порознь эти два места не работают: ролик грузится не мгновенно, и запуск по
+// факту загрузки возвращал к жизни ровно то, что здесь только что остановили —
+// так второй ролик 1080p и крутился вхолостую, пока игра шла.
+let windowFocused = true;
+
+// Простой. Если игрок тридцать секунд не трогал мышь, клавиатуру и колесо,
+// фоновый ролик встаёт на паузу. Это самый дорогой элемент интерфейса —
+// замерено 42–47 % ядра, — и платится он за кадр, а не за пиксель: стоящий
+// ролик не стоит ничего. Холсты (волна, пружина, диорама) гасятся по тому же
+// признаку своим таймером в effects.js; здесь тот же порог для видео.
+//
+// Фон при этом не гаснет и не подменяется — на экране остаётся тот же кадр,
+// на котором игрока оставили. Возвращается всё с первой же активности: и
+// мышь, и клавиша, и колесо.
+const IDLE_AFTER_MS = 30000;
+let userIdle = false;
+let _idleTimer = null;
+
+function markActivity() {
+  if (userIdle) {
+    userIdle = false;
+    syncVideoPlayback();
+  }
+  if (_idleTimer) clearTimeout(_idleTimer);
+  _idleTimer = setTimeout(() => {
+    userIdle = true;
+    syncVideoPlayback();
+  }, IDLE_AFTER_MS);
+}
+
+function watchIdle() {
+  ['pointermove', 'pointerdown', 'keydown', 'wheel'].forEach((event) => {
+    window.addEventListener(event, markActivity, { passive: true });
+  });
+  markActivity();
+}
+
 function syncVideoPlayback() {
+  const onScreen = !document.hidden && windowFocused && !userIdle;
   const bgPlay = $('#bgPlay');
   const bgMods = $('#bgMods');
+  const bgSettings = $('#bgSettings');
   const fade = $('#bgFade');
-  if (bgPlay) {
-    if (bgPlay.classList.contains('hidden')) bgPlay.pause();
-    else bgPlay.play().catch(() => {});
+  // Уехавший вверх слой ещё виден, но уже растворяется: декодировать ему
+  // нечего, он для зрителя уходит (см. leaving-up в style.css).
+  const shown = (video) => !!video
+    && !video.classList.contains('hidden')
+    && !video.classList.contains('leaving-up');
+  setVideoWanted(bgPlay, onScreen && shown(bgPlay));
+  setVideoWanted(bgMods, onScreen && shown(bgMods));
+  setVideoWanted(bgSettings, onScreen && shown(bgSettings));
+  // Слой кроссфейда живёт только на время перехода, и переход этот начинается
+  // от действия игрока — то есть при окне в фокусе. Поэтому фокус для него не
+  // проверяем: иначе ролик не запустился бы в тот единственный момент, когда он
+  // нужен.
+  setVideoWanted(fade, !!fade?.classList.contains('show'));
+}
+
+/* ── Переход на «Настройки» ──
+   Прежний фон уходит вверх и растворяется, новый проявляется из размытия — в
+   конце на экране стоит фон настроек. Остальные переходы между вкладками
+   остаются мгновенными. */
+const BG_SWAP_MS = 700;
+const TAB_BG = { play: '#bgPlay', mods: '#bgMods', settings: '#bgSettings' };
+let _bgSwapTimer = null;
+
+/* Снять переходные классы так, чтобы слой не поехал на место четыре секунды:
+   у .bg переход transform растянут ради параллакса, и без запрета на переход
+   возврат был бы виден как медленно выползающий фон. */
+function dropSwapClasses(el) {
+  el.classList.add('bg-no-transition');
+  el.classList.remove('arriving', 'leaving-up');
+  requestAnimationFrame(() => el.classList.remove('bg-no-transition'));
+}
+
+/** Оставить на экране фон одной вкладки, остальные спрятать. */
+function setActiveBackground(tabName) {
+  $('#bgPlay').classList.toggle('hidden', tabName !== 'play');
+  $('#bgMods').classList.toggle('hidden', tabName !== 'mods');
+  $('#bgSettings').classList.toggle('hidden', tabName !== 'settings');
+}
+
+/* Прервать переход и привести слои в порядок. Раскладку восстанавливаем тут же,
+   а не оставляем таймеру: игрок может щёлкать по вкладкам быстрее, чем идёт
+   переход, и отменённый таймер не спрятал бы слой — тогда фоны накладывались
+   друг на друга, и поверх нужного оказывался чужой ролик. */
+function resetBackgroundSwap(tabName) {
+  if (_bgSwapTimer) { clearTimeout(_bgSwapTimer); _bgSwapTimer = null; }
+  $$('.bg').forEach(dropSwapClasses);
+  if (tabName) setActiveBackground(tabName);
+}
+
+/** Показать фон одной вкладки, без анимации. */
+function applyTabBackgrounds(tabName) {
+  resetBackgroundSwap(tabName);
+}
+
+function swapBackgroundToSettings(tabName, prevTab) {
+  // Наплыв только у «Настроек»: между play и mods фон меняется мгновенно.
+  if (tabName !== 'settings' && prevTab !== 'settings') return false;
+  const next = $(TAB_BG[tabName]);
+  const prev = $(TAB_BG[prevTab]);
+  if (!next || !prev || next === prev) return false;
+  // У вкладки нет своего ролика — смешивать нечего, лучше мгновенная подмена.
+  if (next.classList.contains('is-missing')
+      || prev.classList.contains('is-missing')) return false;
+
+  // Прошлый переход (если он ещё шёл) закрываем сразу: на экране должен
+  // остаться ровно тот фон, от которого начинаем.
+  resetBackgroundSwap(prevTab);
+  prev.classList.remove('hidden');
+  next.classList.remove('hidden');
+  syncVideoPlayback();          // оба слоя на экране — оба должны играть
+
+  // Классы вешаем следующим кадром: снятый и навешенный в один тик класс не
+  // считается сменой состояния, и повторный клик не перезапустил бы переход.
+  requestAnimationFrame(() => {
+    prev.classList.add('leaving-up');
+    next.classList.add('arriving');
+    _bgSwapTimer = setTimeout(() => {
+      _bgSwapTimer = null;
+      next.classList.remove('arriving');
+      dropSwapClasses(prev);
+      setActiveBackground(tabName);
+      syncVideoPlayback();      // ушедший слой встал на паузу
+    }, BG_SWAP_MS + 40);
+  });
+  return true;
+}
+
+function setVideoWanted(video, wanted) {
+  if (!video) return;
+  video._pulseWanted = wanted;
+  if (wanted) {
+    if (video.paused) video.play().catch(() => {});
+  } else {
+    video.pause();
   }
-  if (bgMods) {
-    if (bgMods.classList.contains('hidden')) bgMods.pause();
-    else bgMods.play().catch(() => {});
-  }
-  // Слой кроссфейда нужен только на время перехода
-  if (fade && !fade.classList.contains('show')) fade.pause();
 }
 
 // Маска среды для волны строится из геометрии элементов. Интерфейс перерисовывается
@@ -1271,13 +1813,18 @@ function refreshScramble() {
 }
 
 function switchTab(tabName, button) {
+  const prevTab = currentTab;
   currentTab = tabName;
   $$('.page').forEach((page) => page.classList.remove('active'));
   $$('.nav-btn').forEach((item) => item.classList.remove('active'));
   $(`#page-${tabName}`).classList.add('active');
   button.classList.add('active');
-  $('#bgPlay').classList.toggle('hidden', tabName === 'mods');
-  $('#bgMods').classList.toggle('hidden', tabName !== 'mods');
+  // У каждой вкладки свой фон. Переход с наплывом — только у «Настроек»;
+  // между play и mods, при первом показе и при повторном клике по своей же
+  // вкладке фон меняется мгновенно: смешивать нечего.
+  if (tabName === prevTab || !swapBackgroundToSettings(tabName, prevTab)) {
+    applyTabBackgrounds(tabName);
+  }
   syncVideoPlayback();
   refreshFxObstacles();
   refreshScramble();
@@ -1291,11 +1838,11 @@ function switchTab(tabName, button) {
 async function launchGame() {
   const version = activeVersion();
   const selectedLoader = activeLoader();
-  appendLog(`Launch requested for ${currentMode} ${version} (${selectedLoader.label})`);
+  appendLog(`Launch requested for ${PROFILE_MODE} ${version} (${selectedLoader.label})`);
 
   if (IS_FILE_PREVIEW) {
     $('#launchProgress').style.width = '100%';
-    $('#launchStatus').textContent = `Preview launch: ${currentMode} ${version} with ${selectedLoader.label}`;
+    $('#launchStatus').textContent = `Preview launch: ${PROFILE_MODE} ${version} with ${selectedLoader.label}`;
     toast(`Preview launch: ${selectedLoader.label}`, 'ok');
     setTimeout(() => {
       $('#launchProgress').style.width = '0';
@@ -1307,7 +1854,7 @@ async function launchGame() {
   const launchBtn = $('#launchBtn');
   if (launchBtn) launchBtn.disabled = true;
   $('#launchProgress').style.width = '2%';
-  $('#launchStatus').textContent = 'Подготовка...';
+  $('#launchStatus').textContent = t('launch.preparing');
 
   let pollingDone = false;
   let lastLoggedMessage = '';
@@ -1317,12 +1864,12 @@ async function launchGame() {
     //    calls LaunchProgress.begin(), so polling afterwards can't read stale state.
     let result;
     if (window.pulse && typeof window.pulse.launchMinecraft === 'function') {
-      result = await window.pulse.launchMinecraft({ version, mode: currentMode, loaderId: selectedLoader.id });
+      result = await window.pulse.launchMinecraft({ version, mode: PROFILE_MODE, loaderId: selectedLoader.id });
     } else {
       result = await fetchJson('/api/launch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ version, mode: currentMode, loaderId: selectedLoader.id })
+        body: JSON.stringify({ version, mode: PROFILE_MODE, loaderId: selectedLoader.id })
       });
     }
     if (result && result.ok === false) throw new Error(result.error || 'Launch failed');
@@ -1342,14 +1889,14 @@ async function launchGame() {
         appendLog(p.message);
         lastLoggedMessage = p.message;
       }
-      if (p.error) throw new Error(p.message || 'Ошибка запуска');
+      if (p.error) throw new Error(p.message || t('launch.failed'));
       if (p.stage === 'running') { pollingDone = true; break; }
     }
 
     $('#launchProgress').style.width = '100%';
-    $('#launchStatus').textContent = 'Игра запущена';
-    appendLog(`Игра запущена: ${selectedLoader.label}`);
-    toast('Minecraft запущен', 'ok');
+    $('#launchStatus').textContent = t('launch.started');
+    appendLog(t('launch.startedWith', { loader: selectedLoader.label }));
+    toast(t('launch.toastStarted'), 'ok');
     setTimeout(() => {
       $('#launchProgress').style.width = '0';
       $('#launchStatus').textContent = 'Ready';
@@ -1357,9 +1904,9 @@ async function launchGame() {
   } catch (error) {
     pollingDone = true;
     $('#launchProgress').style.width = '0';
-    $('#launchStatus').textContent = 'Ошибка запуска';
-    appendLog(`Ошибка запуска: ${error.message}`);
-    toast(`Ошибка: ${error.message}`, 'err');
+    $('#launchStatus').textContent = t('launch.failed');
+    appendLog(t('launch.failedDetail', { message: error.message }));
+    toast(t('common.error', { message: error.message }), 'err');
   } finally {
     pollingDone = true;
     if (launchBtn) launchBtn.disabled = false;
@@ -1390,7 +1937,7 @@ async function loadMods() {
     return;
   }
   try {
-    const data = await fetchJson(`/api/mods?mode=${encodeURIComponent(currentMode)}`);
+    const data = await fetchJson(`/api/mods?mode=${encodeURIComponent(PROFILE_MODE)}`);
     mods = (data.mods || []).map((mod) => ({ ...mod }));
   } catch {
     mods = PREVIEW_MODS.map((mod) => ({ ...mod }));
@@ -1406,7 +1953,7 @@ let modsOffset = 0;
 let modsExhausted = false;    // источник отдал меньше страницы — дальше пусто
 
 function catalogUrl(query, offset) {
-  const loaderKey = currentMode === 'vanilla' ? activeLoader().familyKey : 'fabric';
+  const loaderKey = activeLoader().familyKey;
   return `/api/catalog/mods?version=${encodeURIComponent(activeVersion())}`
     + `&loader=${encodeURIComponent(loaderKey)}`
     + `&query=${encodeURIComponent(query)}`
@@ -1458,7 +2005,7 @@ async function loadMoreMods() {
   if (modsExhausted || IS_FILE_PREVIEW) return;
   const btn = $('#loadMoreMods');
   const query = $('#modsSearch') ? $('#modsSearch').value : '';
-  if (btn) { btn.disabled = true; btn.textContent = 'Загружаю…'; }
+  if (btn) { btn.disabled = true; btn.textContent = t('common.loading'); }
   try {
     const data = await fetchJson(catalogUrl(query, modsOffset));
     const page = data.results || [];
@@ -1473,9 +2020,9 @@ async function loadMoreMods() {
       renderBrowserMods(browserMods);
     }
   } catch (error) {
-    toast(`Не удалось догрузить: ${error.message}`, 'err');
+    toast(t('mods.loadMoreFailed', { message: error.message }), 'err');
   } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'Показать ещё'; }
+    if (btn) { btn.disabled = false; btn.textContent = t('mods.showMore'); }
     syncLoadMore();
   }
 }
@@ -1577,7 +2124,7 @@ function renderBrowserMods(items) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           // Include mode so the server stores the mod in the correct profile folder
-          body: JSON.stringify({ slug: mod.slug, mcVersion: versionId, loader: loader.familyKey, mode: currentMode })
+          body: JSON.stringify({ slug: mod.slug, mcVersion: versionId, loader: loader.familyKey, mode: PROFILE_MODE })
         });
         if (result && result.ok === false) throw new Error(result.error || 'Install failed');
         btn.textContent = 'Installed';
@@ -1599,17 +2146,19 @@ function renderBrowserMods(items) {
         iconUrl: mod.iconUrl || mod.iconSmall || '',
         slug: mod.slug || '',
         source: mod.source || cfg.modSource || 'modrinth',
-        meta: `${mod.author || 'Unknown'} · ${compatibleVersion && compatibleLoader ? 'совместим' : 'несовместим'}${mod.downloads ? ' · ' + formatDownloads(mod.downloads) + ' ↓' : ''}`,
-        desc: mod.desc && mod.desc.trim() ? mod.desc : 'Описание недоступно.',
+        meta: `${mod.author || 'Unknown'} · ${compatibleVersion && compatibleLoader ? t('mods.compatible') : t('mods.incompatible')}${mod.downloads ? ' · ' + formatDownloads(mod.downloads) + ' ↓' : ''}`,
+        desc: mod.desc && mod.desc.trim() ? mod.desc : t('mods.noDescription'),
         flags: [
           { text: modLoaders.join(', ') || loader.family, kind: 'info' },
           { text: compatibleVersion && compatibleLoader ? 'compatible' : 'not compatible', kind: compatibleVersion && compatibleLoader ? 'ok' : 'bad' },
-          ...(modVersions.length ? [{ text: 'версии: ' + modVersions.slice(0, 6).join(', ') + (modVersions.length > 6 ? ' …' : ''), kind: 'info' }] : [])
+          ...(modVersions.length ? [{ text: t('mods.versionsInline', { list: modVersions.slice(0, 6).join(', ') + (modVersions.length > 6 ? ' …' : '') }), kind: 'info' }] : [])
         ],
         toggleLabel: null,
         url: mod.url || null
       });
-      switchTab('mods', document.querySelector('.nav-btn'));
+      // Кнопку берём именно этой вкладки: с общей первой кнопкой подсветка
+      // оставалась на Play, пока открыт Mods.
+      switchTab('mods', document.querySelector('.nav-btn[onclick*="mods"]'));
     });
     host.appendChild(row);
   });
@@ -1646,13 +2195,13 @@ function buildModRow(mod) {
 
 function modFlags(mod) {
   const flags = [];
-  if (mod.downloaded) flags.push({ text: 'downloaded', kind: 'info' });
-  else if (mod.enabled) flags.push({ text: 'enabled', kind: 'ok' });
-  else flags.push({ text: 'disabled', kind: 'warn' });
+  if (mod.downloaded) flags.push({ text: t('mods.flagDownloaded'), kind: 'info' });
+  else if (mod.enabled) flags.push({ text: t('mods.flagEnabled'), kind: 'ok' });
+  else flags.push({ text: t('mods.flagDisabled'), kind: 'warn' });
   if (typeof mod.compatible === 'boolean') {
     flags.push({ text: mod.compatible ? 'compatible' : 'incompatible', kind: mod.compatible ? 'ok' : 'bad' });
   }
-  if (mod.latestKnownVersion) flags.push({ text: `latest ${mod.latestKnownVersion}`, kind: 'info' });
+  if (mod.latestKnownVersion) flags.push({ text: t('mods.latestVersion', { version: mod.latestKnownVersion }), kind: 'info' });
   return flags;
 }
 
@@ -1664,9 +2213,9 @@ function selectMod(mod) {
     name: mod.name,
     icon: mod.name.charAt(0).toUpperCase(),
     meta: `${mod.version || '?'} - ${mod.compatible ? 'compatible' : 'incompatible'} - ${mod.enabled ? 'enabled' : mod.downloaded ? 'downloaded only' : 'disabled'}`,
-    desc: mod.desc && mod.desc.trim() ? mod.desc : `Текущая цель: ${activeVersion()} / ${activeLoader().label}`,
+    desc: mod.desc && mod.desc.trim() ? mod.desc : t('mods.currentTarget', { version: activeVersion(), loader: activeLoader().label }),
     flags: modFlags(mod),
-    toggleLabel: mod.enabled ? 'Disable' : 'Enable',
+    toggleLabel: t('mods.toggle'),
     url: null
   });
 }
@@ -1703,7 +2252,7 @@ function showModDetail(info) {
 
   /* Описание показываем коротким сразу, полное подтягиваем следом. Так панель
      не пустует, пока идёт запрос, и остаётся осмысленной, если он не удался. */
-  $('#detailDesc').textContent = info.desc || 'Описание недоступно.';
+  $('#detailDesc').textContent = info.desc || t('mods.noDescription');
   currentDetail = {
     slug: info.slug || '',
     source: info.source || cfg.modSource || 'modrinth',
@@ -1734,7 +2283,7 @@ function showModDetail(info) {
     }
     linkEl.href = info.url;
     linkEl.textContent = currentDetail.source === 'curseforge'
-      ? 'Открыть на CurseForge ↗' : 'Открыть на Modrinth ↗';
+      ? t('mods.openCurseforge') : t('mods.openModrinth');
     linkEl.style.display = '';
   } else if (linkEl) {
     linkEl.style.display = 'none';
@@ -1786,7 +2335,7 @@ async function toggleDetailVersions() {
   if (host.childElementCount) { host.dataset.open = 'true'; return; }
 
   host.dataset.open = 'true';
-  host.textContent = 'Загружаю список версий…';
+  host.textContent = t('mods.loadingVersions');
   const detail = currentDetail;
   try {
     const data = await fetchJson(`/api/catalog/versions?source=${encodeURIComponent(detail.source)}`
@@ -1796,7 +2345,7 @@ async function toggleDetailVersions() {
     if (currentDetail !== detail) return;
     renderDetailVersions(data.versions || []);
   } catch (error) {
-    host.textContent = `Не удалось получить версии: ${error.message}`;
+    host.textContent = t('mods.versionsFailed', { message: error.message });
   }
 }
 
@@ -1806,7 +2355,7 @@ function renderDetailVersions(list) {
   const host = $('#detailVersions');
   host.textContent = '';
   if (!list.length) {
-    host.textContent = `Для ${activeVersion()} / ${activeLoader().family} версий нет.`;
+    host.textContent = t('mods.noVersions', { version: activeVersion(), loader: activeLoader().family });
     return;
   }
 
@@ -1817,7 +2366,7 @@ function renderDetailVersions(list) {
     const left = document.createElement('div');
     const name = document.createElement('div');
     name.className = 'version-name';
-    name.textContent = version.name || version.fileName || 'без названия';
+    name.textContent = version.name || version.fileName || t('mods.untitled');
 
     const meta = document.createElement('div');
     meta.className = 'version-meta';
@@ -1831,9 +2380,9 @@ function renderDetailVersions(list) {
 
     const btn = document.createElement('button');
     btn.className = 'version-dl';
-    btn.textContent = 'Скачать';
+    btn.textContent = t('mods.download');
     btn.disabled = !version.downloadUrl;
-    if (!version.downloadUrl) btn.title = 'Прямой ссылки нет — автор запретил скачивание через API';
+    if (!version.downloadUrl) btn.title = t('mods.noDirectLinkApi');
     btn.onclick = () => installModVersion(version, btn);
 
     row.append(left, btn);
@@ -1845,14 +2394,14 @@ function renderDetailVersions(list) {
    одинаков для обоих источников, поэтому дорога на бэкенде одна. */
 async function installModVersion(version, btn) {
   if (!version.downloadUrl) {
-    toast('Прямой ссылки нет — эту версию придётся скачать вручную', 'err');
+    toast(t('mods.noDirectLinkManual'), 'err');
     return;
   }
   if (IS_FILE_PREVIEW) { toast(`Preview: скачал бы ${version.fileName}`, 'ok'); return; }
 
   const was = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Качаю…';
+  btn.textContent = t('mods.downloading');
   try {
     const result = await fetchJson('/api/mods/install', {
       method: 'POST',
@@ -1862,17 +2411,17 @@ async function installModVersion(version, btn) {
         fileName: version.fileName,
         mcVersion: activeVersion(),
         loader: activeLoader().familyKey,
-        mode: currentMode
+        mode: PROFILE_MODE
       })
     });
     if (result && result.ok === false) throw new Error(result.error || 'Install failed');
-    btn.textContent = 'Готово';
-    toast(`${version.fileName || 'Мод'} установлен`, 'ok');
+    btn.textContent = t('common.done');
+    toast(t('mods.installedToast', { name: version.fileName || t('mods.defaultName') }), 'ok');
     await loadMods();
   } catch (error) {
     btn.disabled = false;
     btn.textContent = was;
-    toast(`Не удалось скачать: ${error.message}`, 'err');
+    toast(t('mods.downloadFailed', { message: error.message }), 'err');
   }
 }
 
@@ -1952,7 +2501,7 @@ async function toggleSelectedMod() {
         action: selectedMod.enabled ? 'disable' : 'enable',
         name: selectedMod.fileName,
         mcVersion: activeVersion(),
-        mode: currentMode
+        mode: PROFILE_MODE
       })
     });
     await loadMods();
@@ -1974,7 +2523,7 @@ async function restoreModsSnapshot() {
     await fetchJson('/api/mods', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: 'restore', name: '', mcVersion: activeVersion(), mode: currentMode })
+      body: JSON.stringify({ action: 'restore', name: '', mcVersion: activeVersion(), mode: PROFILE_MODE })
     });
     await loadMods();
   } catch (error) {
@@ -1983,7 +2532,6 @@ async function restoreModsSnapshot() {
 }
 
 async function runAutoDisable() {
-  if (currentMode !== 'vanilla') return;
   if (IS_FILE_PREVIEW) {
     mods = mods.map((mod) => (!mod.downloaded && mod.enabled && !mod.compatible ? { ...mod, enabled: false } : mod));
     renderMods();
@@ -1991,7 +2539,7 @@ async function runAutoDisable() {
     return;
   }
   try {
-    const result = await fetchJson(`/api/mods/auto-disable?mcVersion=${encodeURIComponent(activeVersion())}&mode=${encodeURIComponent(currentMode)}`, { method: 'POST' });
+    const result = await fetchJson(`/api/mods/auto-disable?mcVersion=${encodeURIComponent(activeVersion())}&mode=${encodeURIComponent(PROFILE_MODE)}`, { method: 'POST' });
     await loadMods();
     toast(`Auto-disabled: ${(result.disabled || []).length}`, 'ok');
   } catch (error) {
@@ -2008,7 +2556,7 @@ async function runAutoDisable() {
 async function installPerformancePack() {
   const loader = activeLoader();
   if (loader.familyKey === 'vanilla') {
-    toast('Моды производительности ставятся на Fabric — сначала выбери loader', 'err');
+    toast(t('mods.perfFabricOnly'), 'err');
     return;
   }
   const version = activeVersion();
@@ -2016,31 +2564,31 @@ async function installPerformancePack() {
     toast(`Preview: набор производительности для ${version}`, 'ok');
     return;
   }
-  toast('Ставлю моды производительности, это займёт около минуты…', 'ok');
+  toast(t('mods.perfInstalling'), 'ok');
   try {
     const result = await fetchJson('/api/mods/install-performance', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mcVersion: version, loader: loader.familyKey, mode: currentMode })
+      body: JSON.stringify({ mcVersion: version, loader: loader.familyKey, mode: PROFILE_MODE })
     });
     const failed = result.failed || 0;
     if (failed) {
       const names = (result.results || []).filter((r) => !r.ok).map((r) => r.name).join(', ');
-      toast(`Поставлено ${result.installed}, не встало ${failed}: ${names}`, 'err');
+      toast(t('mods.perfPartial', { installed: result.installed, failed, names }), 'err');
     } else {
-      toast(`Готово: ${result.installed} модов производительности`, 'ok');
+      toast(t('mods.perfDone', { count: result.installed }), 'ok');
     }
     await loadMods();
     refreshFxObstacles();
   } catch (e) {
-    toast(`Не вышло: ${e.message}`, 'err');
+    toast(t('common.failed', { message: e.message }), 'err');
   }
 }
 
 async function autoInstallRequiredMods() {
   const loader = activeLoader();
   if (loader.familyKey === 'vanilla') {
-    toast('Auto-install: выбери Fabric или другой loader', 'err');
+    toast(t('mods.autoInstallPickLoader'), 'err');
     return;
   }
   const version = activeVersion();
@@ -2048,15 +2596,15 @@ async function autoInstallRequiredMods() {
     toast(`Preview: auto-install для ${loader.family} ${version}`, 'ok');
     return;
   }
-  toast('Устанавливаю необходимые моды...', 'ok');
+  toast(t('mods.autoInstalling'), 'ok');
   try {
     const result = await fetchJson('/api/mods/auto-install', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mcVersion: version, loader: loader.familyKey, mode: currentMode })
+      body: JSON.stringify({ mcVersion: version, loader: loader.familyKey, mode: PROFILE_MODE })
     });
     const count = result.installed?.length || 0;
-    toast(count > 0 ? `Установлено ${count} мод(ов)` : 'Все необходимые моды уже установлены', 'ok');
+    toast(count > 0 ? t('mods.autoInstalledCount', { count }) : t('mods.autoAllInstalled'), 'ok');
     await loadMods();
   } catch (e) {
     toast(`Auto-install failed: ${e.message}`, 'err');
@@ -2064,13 +2612,12 @@ async function autoInstallRequiredMods() {
 }
 
 async function checkModUpdates() {
-  if (currentMode !== 'vanilla') return;
   if (IS_FILE_PREVIEW) {
     toast('Preview: 1 important mod update found', 'ok');
     return;
   }
   try {
-    const result = await fetchJson(`/api/mods/check-updates?mcVersion=${encodeURIComponent(activeVersion())}&mode=${encodeURIComponent(currentMode)}`);
+    const result = await fetchJson(`/api/mods/check-updates?mcVersion=${encodeURIComponent(activeVersion())}&mode=${encodeURIComponent(PROFILE_MODE)}`);
     const important = (result.results || []).filter((item) => item.criticalUpdate).length;
     toast(`Important updates: ${important}`, 'ok');
   } catch (error) {
@@ -2110,13 +2657,14 @@ function updateRam(value) {
 
 async function saveSettings(showToast = false) {
   cfg.javaPath = $('#javaPath').value.trim();
+  cfg.autoJava = $('#autoJava').checked;
   cfg.ramMb = Number($('#ramSlider').value);
   cfg.autoUpdateMods = $('#autoUpdateMods').checked;
   cfg.autoDisableIncompatibleMods = $('#autoDisableMods').checked;
   cfg.useDownloadedModsLibrary = $('#useDownloadedModsLibrary').checked;
   cfg.musicEnabled = $('#musicEnabled').checked;
   cfg.musicVolume = Number($('#musicVolumeSlider').value);
-  cfg.lastMode = currentMode;
+  cfg.lastTheme = currentTheme;
   const keyInput = $('#curseforgeKey');
   if (keyInput) cfg.curseforgeKey = keyInput.value.trim();
   const langSelect = $('#langSelect');
@@ -2138,11 +2686,11 @@ async function saveSettings(showToast = false) {
         useDownloadedModsLibrary: cfg.useDownloadedModsLibrary,
         musicEnabled: cfg.musicEnabled,
         musicVolume: cfg.musicVolume,
-        lastMode: cfg.lastMode,
+        lastTheme: cfg.lastTheme,
         javaPath: cfg.javaPath,
-        selectedVersion: '1.21.4',
+        autoJava: cfg.autoJava,
+        selectedVersion: cfg.selectedVersion,
         vanillaVersion: cfg.vanillaVersion,
-        pulseLoaderId: cfg.pulseLoaderId,
         vanillaLoaderId: cfg.vanillaLoaderId,
         curseforgeKey: cfg.curseforgeKey,
         modSource: cfg.modSource,
@@ -2175,7 +2723,7 @@ function applyLanguage(code, persist) {
   // Перерисовываем то, что собрано в JS: подписи режима, список версий,
   // установленные моды и панель аккаунтов
   try {
-    setMode(currentMode, false);
+    setTheme(currentTheme, false);
     renderVersionList();
     renderMods();
     renderAccounts();
@@ -2222,7 +2770,7 @@ function openSpotifyFromModal() {
   const input = $('#spotifyModalInput');
   if (!input) return;
   const raw = input.value.trim();
-  if (!raw) { toast('Вставь ссылку на Spotify', 'err'); return; }
+  if (!raw) { toast(t('sp.needLink'), 'err'); return; }
 
   const match = raw.match(/playlist[/:]([A-Za-z0-9]+)/);
   let targetUrl = null;
@@ -2233,7 +2781,7 @@ function openSpotifyFromModal() {
   }
 
   if (!targetUrl) {
-    toast('Пример: https://open.spotify.com/playlist/xxx', 'err');
+    toast(t('sp.example'), 'err');
     return;
   }
 
@@ -2246,7 +2794,7 @@ function openSpotifyFromModal() {
   } else {
     window.open(targetUrl, '_blank');
   }
-  toast('Spotify плеер открыт', 'ok');
+  toast(t('sp.openedToast'), 'ok');
 }
 
 /** Legacy trigger from the music card button */
@@ -2790,10 +3338,10 @@ function updateBytebeatNowPlaying() {
   const title = $('#bytebeatNowTitle');
   const meta = $('#bytebeatNowMeta');
   const btn = $('#bytebeatPlayBtn');
-  const position = `${bytebeatIndex + 1} из ${BYTEBEAT_TRACKS.length}`;
+  const position = t('bb.trackOf', { n: bytebeatIndex + 1, total: BYTEBEAT_TRACKS.length });
   if (icon) icon.textContent = track.icon;
   if (title) title.textContent = track.title;
-  if (meta) meta.textContent = `${playing ? 'Играет' : 'Пауза'} • ${position}`;
+  if (meta) meta.textContent = t('bb.nowPlaying', { state: playing ? t('bb.playing') : t('music.pause'), position });
   if (btn) btn.textContent = playing ? '⏸' : '▶';
 }
 
@@ -2814,11 +3362,11 @@ async function playBytebeatAt(index) {
     musicState.currentTrack = track.title;
     musicState.currentTrackType = 'bytebeat';
     $('#musicTrackTitle').textContent = track.title;
-    $('#musicStatus').textContent = `Bytebeat • ${track.title}`;
+    $('#musicStatus').textContent = t('music.bytebeatTrack', { title: track.title });
     $('#musicPlayBtn').textContent = 'Pause';
     startBytebeatFFT();
   } catch (e) {
-    toast(`Не удалось включить трек: ${e.message}`, 'err');
+    toast(t('music.trackFailed', { message: e.message }), 'err');
   }
   updateBytebeatNowPlaying();
 }
@@ -2938,7 +3486,7 @@ function updateBytebeatFFTSize() {
   if (bytebeatAnalyser) {
     bytebeatAnalyser.fftSize = bytebeatConfig.fftSize;
   }
-  toast(`FFT size: ${bytebeatConfig.fftSize}`, 'ok');
+  toast(t('bb.fftToast', { size: bytebeatConfig.fftSize }), 'ok');
 }
 
 function updateVisualizerHeight(value) {
@@ -2955,18 +3503,18 @@ function renderMP3List() {
   if (!list) return;
   fetchJson('/api/music/tracks').then(resp => {
     if (!resp.ok || !resp.tracks) {
-      list.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:8px;">No audio files</div>';
+      list.innerHTML = `<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:8px;">${escapeHtml(t('music.noAudio'))}</div>`;
       return;
     }
     const mp3s = resp.tracks.filter(name => /\.(mp3|wav|ogg)$/i.test(name));
     if (!mp3s.length) {
-      list.innerHTML = '<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:8px;">No audio files in music folder</div>';
+      list.innerHTML = `<div style="color:rgba(255,255,255,0.3);font-size:12px;padding:8px;">${escapeHtml(t('music.noAudio'))}</div>`;
       return;
     }
     list.innerHTML = mp3s.map(name => `
       <div class="bytebeat-library-item">
         <span>${escapeHtml(name)}</span>
-        <button onclick="playMP3File('${escapeHtml(name)}')">Play</button>
+        <button onclick="playMP3File('${escapeHtml(name)}')">${t('music.play')}</button>
       </div>
     `).join('');
   });
@@ -2985,7 +3533,7 @@ async function playMP3File(filename) {
   audioA.src = track.src;
   audioA.play().catch(() => {});
   $('#musicTrackTitle').textContent = track.title;
-  $('#musicStatus').textContent = `Audio: ${filename}`;
+  $('#musicStatus').textContent = t('music.audioTrack', { name: filename });
   musicState.currentTrack = track.title;
   musicState.currentTrackType = 'audio';
 }

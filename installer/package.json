@@ -1,9 +1,10 @@
 {
   "name": "vulkan-launcher",
   "productName": "vulkan launcher",
-  "version": "1.0.0",
+  "version": "1.1.3",
   "description": "vulkan launcher — Minecraft launcher with isolated Vanilla and managed mod compatibility",
-  "author": "vulkan",
+  "author": "popktop33-cyber <https://github.com/popktop33-cyber>",
+  "homepage": "https://github.com/popktop33-cyber/vulkan-launcher",
   "private": true,
   "main": "main.js",
   "scripts": {
@@ -15,6 +16,7 @@
   "build": {
     "appId": "com.vulkan.launcher",
     "productName": "vulkan launcher",
+    "copyright": "vulkan launcher — © popktop33-cyber, https://github.com/popktop33-cyber/vulkan-launcher",
     "asar": false,
     "files": [
       "main.js",
@@ -25,7 +27,10 @@
       "icon-vulkan.ico",
       "icon-vanilla.ico",
       "package.json",
-      "backend/**/*"
+      "backend/**/*",
+      "!backend/*.log",
+      "!backend/videos-lite/**",
+      "!backend/pulsePLUS.jar"
     ],
     "win": {
       "target": [
